@@ -2,9 +2,14 @@ FROM alpine:latest
 
 WORKDIR /app
 
-COPY . .
+RUN apk add --no-cache unzip wget
 
-RUN chmod +x apps/pocketbase
+RUN wget https://github.com/pocketbase/pocketbase/releases/download/v0.22.6/pocketbase_0.22.6_linux_amd64.zip \
+    && unzip pocketbase_0.22.6_linux_amd64.zip \
+    && chmod +x pocketbase \
+    && rm *.zip
+
+COPY . .
 
 EXPOSE 8090
 

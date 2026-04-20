@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN chmod +x pocketbase
+RUN chmod +x apps/pocketbase
 
 EXPOSE 8090
 

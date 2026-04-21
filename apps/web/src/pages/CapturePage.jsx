@@ -126,7 +126,9 @@ export default function CapturePage() {
     console.log('=== INICIO CREACIÓN DE REGISTRO ===');
     console.log('Payload enviado:', payload);
 
-    const response = await pb.collection('registros').create(payload);
+   const response = await pb.collection('registros').create(payload, {
+    $autoCancel: false
+   });
 
     console.log('=== RESPUESTA DEL SERVIDOR ===');
     console.log('Respuesta completa:', response);

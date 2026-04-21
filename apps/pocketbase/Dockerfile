@@ -13,4 +13,4 @@ COPY . .
 
 EXPOSE 8090
 
-CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090"]
+CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--http-cors=https://martcom-validaciones-web-validacion.mchc0z.easypanel.host"]

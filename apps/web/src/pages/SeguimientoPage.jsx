@@ -121,6 +121,8 @@ export default function SeguimientoPage() {
   }, [registros, searchTerm]);
 
   const startEditing = (registro) => {
+    if (!solicitarClave()) return; // 🔐 AQUÍ SE VALIDA LA CLAVE
+    
     console.log('=== INICIO EDICIÓN ===');
     console.log('Registro a editar:', registro);
     console.log('ID del registro:', registro.id);
@@ -237,7 +239,18 @@ export default function SeguimientoPage() {
       return dateStr;
     }
   };
+  const solicitarClave = () => {
+  const claveCorrecta = "2104"; // 🔑 CAMBIA AQUÍ TU CLAVE
 
+  const clave = prompt("Ingresa la clave para evaluar:");
+
+  if (clave === claveCorrecta) {
+    return true;
+  } else {
+    alert("❌ Clave incorrecta");
+    return false;
+  }
+  };
   return (
     <>
       <Helmet>

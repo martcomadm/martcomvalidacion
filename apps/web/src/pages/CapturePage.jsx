@@ -103,72 +103,73 @@ export default function CapturePage() {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+  e.preventDefault();
 
-    if (!validateForm()) {
-      toast.error('Por favor corrige los errores en el formulario');
-      return;
+  if (!validateForm()) {
+    toast.error('Por favor corrige los errores en el formulario');
+    return;
+  }
+
+  setIsSubmitting(true);
+
+  try {
+    const now = new Date();
+    const fecha_registro = now.toISOString().split('T')[0];
+    const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
+
+    const payload = {
+      ...formData,
+      fecha_registro,
+      hora_registro
+    };
+
+    console.log('=== INICIO CREACIÓN DE REGISTRO ===');
+    console.log('Payload enviado:', payload);
+
+    const response = await pb.collection('registros').create(payload);
+
+    console.log('=== RESPUESTA DEL SERVIDOR ===');
+    console.log('Respuesta completa:', response);
+
+    // ✅ VALIDACIÓN CORRECTA
+    if (!response?.id) {
+      console.error('❌ Respuesta inválida:', response);
+      throw new Error('No se pudo crear el registro');
     }
 
-    setIsSubmitting(true);
+    console.log('✅ Registro creado con ID:', response.id);
 
-    try {
-      const now = new Date();
-      const fecha_registro = now.toISOString().split('T')[0];
-      const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
+    toast.success('Registro guardado correctamente');
 
-      const payload = {
-        ...formData,
-        fecha_registro,
-        hora_registro
-      };
+    // Mostrar modal de éxito
+    setShowSuccessModal(true);
 
-      console.log('=== INICIO CREACIÓN DE REGISTRO ===');
-      console.log('Enviando datos a PocketBase:', payload);
-      console.log('Colección destino: registros');
+  } catch (error) {
+    console.error('=== ERROR ===');
+    console.error('Error completo:', error);
+    console.error('Error data:', error?.data);
 
-      const response = await pb.collection('registros').create(payload, { $autoCancel: false });
+    // 🔥 MENSAJE MÁS INTELIGENTE
+    if (error?.data?.data) {
+      const errores = Object.values(error.data.data)
+        .map(e => e.message)
+        .join(', ');
 
-      console.log('=== RESPUESTA DEL SERVIDOR ===');
-      console.log('Respuesta completa:', response);
-      console.log('Tipo de respuesta:', typeof response);
-      console.log('ID del registro creado:', response?.id);
-      console.log('ID es válido:', !!(response?.id));
-
-      // Validate that response.id exists and is not empty/undefined
-      if (!response || !response.id || response.id.trim() === '') {
-        console.error('ERROR: Respuesta inválida del servidor');
-        console.error('response existe:', !!response);
-        console.error('response.id existe:', !!(response?.id));
-        console.error('response.id valor:', response?.id);
-        throw new Error('No se pudo crear el registro o el ID es inválido');
-      }
-
-      console.log('✓ Registro creado exitosamente con ID:', response.id);
-      console.log('=== FIN CREACIÓN DE REGISTRO ===');
-
-      // Only show success modal after confirming a valid ID exists
-      setShowSuccessModal(true);
-    } catch (error) {
-      console.error('=== ERROR EN CREACIÓN DE REGISTRO ===');
-      console.error('Tipo de error:', error.name);
-      console.error('Mensaje de error:', error.message);
-      console.error('Error completo:', error);
-      console.error('Stack trace:', error.stack);
-      
-      if (error.status === 404) {
-        toast.error('Error 404: La colección "registros" no existe o no está accesible');
-      } else if (error.message.includes('ID es inválido')) {
-        toast.error('Error: No se pudo crear el registro o el ID es inválido');
-      } else {
-        toast.error('Error al guardar el registro', {
-          description: error.message || 'Verifica tu conexión e intenta nuevamente'
-        });
-      }
-    } finally {
-      setIsSubmitting(false);
+      toast.error('Error en campos', {
+        description: errores
+      });
+    } else if (error.status === 404) {
+      toast.error('La colección "registros" no existe');
+    } else {
+      toast.error('Error al guardar', {
+        description: error.message || 'Intenta nuevamente'
+      });
     }
-  };
+
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));

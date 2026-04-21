@@ -17,4 +17,4 @@ COPY . .
 
 EXPOSE 8090
 
-CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--http-cors=*"]
+CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--origins=*"]

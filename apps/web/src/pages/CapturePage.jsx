@@ -126,21 +126,27 @@ export default function CapturePage() {
     console.log('=== INICIO CREACIÓN DE REGISTRO ===');
     console.log('Payload enviado:', payload);
 
-   const response = await pb.collection('registros').create(payload, {
+    const response = await pb.collection('registros').create(payload, {
     $autoCancel: false
-   });
+    });
 
     console.log('=== RESPUESTA DEL SERVIDOR ===');
-    console.log('Respuesta completa:', response);
+    console.log('RESPONSE KEYS:', Object.keys(response));
+    console.log('RESPONSE COMPLETO:', response);
+
+    // 🔥 DETECTAR ID CORRECTAMENTE
+    const recordId = response?.id || response?.data?.id;
+
+    console.log('ID detectado:', recordId);
 
     // ✅ VALIDACIÓN CORRECTA
-    if (!response?.id) {
-      console.error('❌ Respuesta inválida:', response);
-      throw new Error('No se pudo crear el registro');
+    if (!recordId) {
+    console.error('❌ Respuesta inválida:', response);
+    throw new Error('No se pudo crear el registro');
     }
 
-    console.log('✅ Registro creado con ID:', response.id);
-
+    console.log('✅ Registro creado con ID:', recordId);
+    
     toast.success('Registro guardado correctamente');
 
     // Mostrar modal de éxito

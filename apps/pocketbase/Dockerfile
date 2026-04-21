@@ -2,15 +2,20 @@ FROM alpine:latest
 
 WORKDIR /app
 
+# Instalar dependencias necesarias
 RUN apk add --no-cache unzip wget
 
-RUN wget https://github.com/pocketbase/pocketbase/releases/download/v0.22.6/pocketbase_0.22.6_linux_amd64.zip \
-    && unzip pocketbase_0.22.6_linux_amd64.zip \
+# Descargar PocketBase (versión nueva compatible con CORS)
+RUN wget https://github.com/pocketbase/pocketbase/releases/download/v0.23.0/pocketbase_0.23.0_linux_amd64.zip \
+    && unzip pocketbase_0.23.0_linux_amd64.zip \
     && chmod +x pocketbase \
-    && rm *.zip
+    && rm pocketbase_0.23.0_linux_amd64.zip
 
+# Copiar archivos del proyecto
 COPY . .
 
+# Exponer puerto
 EXPOSE 8090
 
-CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--http-cors=https://martcom-validaciones-web-validacion.mchc0z.easypanel.host"]
+# Ejecutar PocketBase con CORS habilitado
+CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--http-cors=*"]

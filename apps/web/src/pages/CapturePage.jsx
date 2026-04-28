@@ -71,12 +71,6 @@ export default function CapturePage() {
       newErrors.curp = 'El CURP debe tener 18 caracteres';
     }
 
-    if (!formData.correo.trim()) {
-      newErrors.correo = 'El correo es requerido';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.correo)) {
-      newErrors.correo = 'El correo no es válido';
-    }
-
     if (!formData.ejecutivo) {
       newErrors.ejecutivo = 'Selecciona un ejecutivo';
     }

@@ -59,12 +59,6 @@ export default function CapturePage() {
       newErrors.titular = 'El nombre del titular es requerido';
     }
 
-    if (!formData.telefono.trim()) {
-      newErrors.telefono = 'El teléfono es requerido';
-    } else if (!/^\d{10}$/.test(formData.telefono)) {
-      newErrors.telefono = 'El teléfono debe tener exactamente 10 dígitos';
-    }
-
     if (!formData.nss.trim()) {
       newErrors.nss = 'El NSS es requerido';
     } else if (!/^\d+$/.test(formData.nss)) {

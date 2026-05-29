@@ -1,435 +1,417 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Helmet } from 'react-helmet';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { TrendingUp, Users, RefreshCw, AlertCircle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
-import { UserPlus, CheckCircle2, AlertCircle } from 'lucide-react';
 import pb from '@/lib/pocketbaseClient';
-import SuccessModal from '@/components/SuccessModal.jsx';
 
-const EJECUTIVOS = [
-  'ADRIANA RANGEL', 'ARTURO GARCIA', 'ALBERTO GONZALEZ', 'HORTENSIA RAMIREZ', 'BLANCA SEGUNDO', 'CARLOS RUIZ',
-  'CLAUDIA RAMIREZ', 'CINTIA DEL MONTE', 'DIETER MARTINEZ', 'ELIZABETH AGUILERA', 'FATIMA OLVERA',
-  'ISELA GALICIA', 'JOSE LARA', 'JONATHAN NUÑEZ', 'JOSE LUIS MARTINEZ', 'JOSSELINE GALICIA',
-  'JOZIC MARTINEZ', 'JULIETA GALLEGOS', 'GO3RA', 'LIZETTE MORALES', 'MONSERRAT OLVERA',
-  'PAOLA SERRANO', 'PAMELA MONTIEL', 'SARAHI MORALES', 'SUSANA SOLIS',
-  'TONATIHU RAMIREZ', 'VICTOR DIOSDADO', 'VICENTE MARTINEZ', 'WENDY MENDOZA',
-  'YAIR RUIZ', 'YESSICA BECERRIL'
+const COLORS = ['#148286', '#2f888c', '#FF8042', '#FFBB28', '#00C49F', '#8884d8', '#82ca9d', '#a4de6c'];
+
+const RANGE_OPTIONS = [
+  { key: 'today', label: 'Hoy' },
+  { key: '7d', label: '7 días' },
+  { key: '30d', label: '30 días' },
+  { key: 'all', label: 'Todo' }
 ];
 
-const PLANES = ['PLAN 1', 'PLAN 2'];
+const toDateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
-const TIPOS_INGRESO = ['RECUPERACIÓN', 'REACTIVACION', 'PATRON', 'PROVEEDOR', 'REFERIDO', 'NUEVA'];
-
-const CHATS = [
-  'CRM', 'PREDICTIVO', 'CHAT 01', 'CHAT 02', 'CHAT 03', 'CHAT 04',
-  'CHAT 05', 'CHAT 06', 'CHAT 07', 'CHAT 09', 'CHAT 11', 'CHAT B','CHAT EXTERNO'
-];
-
-const INITIAL_FORM_DATA = {
-  titular: '',
-  telefono: '',
-  nss: '',
-  curp: '',
-  correo: '',
-  ejecutivo: '',
-  plan: '',
-  tipo_ingreso: '',
-  chat: '',
-  comentarios: ''
+const getRecordDate = (registro) => {
+  if (registro?.fecha_registro) {
+    const [y, m, d] = registro.fecha_registro.split('-').map(Number);
+    if (y && m && d) return new Date(y, m - 1, d);
+  }
+  const created = registro?.created ? new Date(registro.created) : null;
+  return created && !Number.isNaN(created.getTime()) ? created : null;
 };
 
-export default function CapturePage() {
-  const [formData, setFormData] = useState(INITIAL_FORM_DATA);
-  const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [nssFeedback, setNssFeedback] = useState('');
+const formatDateLabel = (date) =>
+  date.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
 
-  const validateForm = () => {
-    const newErrors = {};
+export default function MetricasPage() {
+  const [registros, setRegistros] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [selectedRange, setSelectedRange] = useState('30d');
 
-    if (!formData.titular.trim()) {
-      newErrors.titular = 'El nombre del titular es requerido';
+  const fetchData = async (isManual = false) => {
+    try {
+      if (isManual) setIsLoading(true);
+      setError(null);
+
+      const result = await pb.collection('registros').getList(1, 500, {
+        sort: '-created',
+        $autoCancel: false
+      });
+
+      setRegistros(result.items);
+      setLastUpdate(new Date());
+    } catch (err) {
+      console.error('Error al cargar datos:', err);
+      setError('No se pudo establecer conexión con la base de datos.');
+      if (isManual) toast.error('Error al recargar las métricas');
+    } finally {
+      setIsLoading(false);
     }
-
-    if (!formData.nss.trim()) {
-      newErrors.nss = 'El NSS es requerido';
-    } else if (!/^\d+$/.test(formData.nss)) {
-      newErrors.nss = 'El NSS debe contener solo números';
-    }
-
-    if (!formData.curp.trim()) {
-      newErrors.curp = 'El CURP es requerido';
-    } else if (formData.curp.length < 18) {
-      newErrors.curp = 'El CURP debe tener 18 caracteres';
-    }
-
-    if (!formData.ejecutivo) {
-      newErrors.ejecutivo = 'Selecciona un ejecutivo';
-    }
-
-    if (!formData.plan) {
-      newErrors.plan = 'Selecciona un plan';
-    }
-
-    if (!formData.tipo_ingreso) {
-      newErrors.tipo_ingreso = 'Selecciona el tipo de ingreso';
-    }
-
-    if (!formData.chat) {
-      newErrors.chat = 'Selecciona un chat';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e) => {
-  e.preventDefault();
+  useEffect(() => {
+    fetchData(true);
 
-  if (!validateForm()) {
-    toast.error('Por favor corrige los errores en el formulario');
-    return;
-  }
+    const dailyCheckId = setInterval(() => {
+      const now = new Date();
+      if (now.getHours() === 0 && now.getMinutes() === 0) {
+        fetchData(false);
+      }
+    }, 60000);
 
-  setIsSubmitting(true);
+    return () => clearInterval(dailyCheckId);
+  }, []);
 
-  try {
-    const now = new Date();
-    const fecha_registro = now.toISOString().split('T')[0];
-    const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
+  const { registrosFiltrados, historialDiario } = useMemo(() => {
+    const today = toDateOnly(new Date());
+    let minDate = null;
 
-    const payload = {
-      ...formData,
-      fecha_registro,
-      hora_registro
-    };
+    if (selectedRange === 'today') {
+      minDate = today;
+    } else if (selectedRange === '7d') {
+      minDate = new Date(today);
+      minDate.setDate(minDate.getDate() - 6);
+    } else if (selectedRange === '30d') {
+      minDate = new Date(today);
+      minDate.setDate(minDate.getDate() - 29);
+    }
 
-    console.log('=== INICIO CREACIÓN DE REGISTRO ===');
-    console.log('Payload enviado:', payload);
-
-    const response = await pb.collection('registros').create(payload, {
-    $autoCancel: false
+    const filtered = registros.filter((registro) => {
+      const date = getRecordDate(registro);
+      if (!date) return false;
+      if (!minDate) return true;
+      return toDateOnly(date) >= minDate;
     });
 
-    console.log('=== RESPUESTA DEL SERVIDOR ===');
-    console.log('RESPONSE KEYS:', Object.keys(response));
-    console.log('RESPONSE COMPLETO:', response);
+    const byDay = filtered.reduce((acc, curr) => {
+      const date = getRecordDate(curr);
+      if (!date) return acc;
+      const key = toDateOnly(date).toISOString().split('T')[0];
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
 
-    // 🔥 DETECTAR ID CORRECTAMENTE
-    const recordId = response?.id || response?.data?.id;
+    const sortedHistory = Object.entries(byDay)
+      .sort(([a], [b]) => new Date(a) - new Date(b))
+      .map(([date, cantidad]) => ({
+        fecha: formatDateLabel(new Date(date)),
+        cantidad
+      }));
 
-    console.log('ID detectado:', recordId);
+    return {
+      registrosFiltrados: filtered,
+      historialDiario: selectedRange === 'all' ? sortedHistory.slice(-30) : sortedHistory
+    };
+  }, [registros, selectedRange]);
 
-    // ✅ VALIDACIÓN CORRECTA
-    if (!recordId) {
-    console.error('❌ Respuesta inválida:', response);
-    throw new Error('No se pudo crear el registro');
+  const totalRegistros = registrosFiltrados.length;
+
+  const dataPlan = Object.entries(
+    registrosFiltrados.reduce((acc, curr) => {
+      acc[curr.plan] = (acc[curr.plan] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .map(([name, value]) => ({ name: name || 'Sin Plan', value }))
+    .filter((item) => item.value > 0);
+
+  const dataTipoIngreso = Object.entries(
+    registrosFiltrados.reduce((acc, curr) => {
+      acc[curr.tipo_ingreso] = (acc[curr.tipo_ingreso] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .map(([name, value]) => ({ name: name || 'Sin Tipo', value }))
+    .filter((item) => item.value > 0);
+
+  const dataChat = Object.entries(
+    registrosFiltrados.reduce((acc, curr) => {
+      acc[curr.chat] = (acc[curr.chat] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .map(([name, value]) => ({ name: name || 'Sin Chat', value }))
+    .filter((item) => item.value > 0);
+
+  const dataEjecutivo = Object.entries(
+    registrosFiltrados.reduce((acc, curr) => {
+      acc[curr.ejecutivo] = (acc[curr.ejecutivo] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .map(([ejecutivo, cantidad]) => ({
+      ejecutivo: ejecutivo?.split(' ')[0] || 'Desconocido',
+      cantidad
+    }))
+    .sort((a, b) => b.cantidad - a.cantidad)
+    .slice(0, 15);
+
+  const dataTipoIngresoChart = useMemo(() => {
+    const total = dataTipoIngreso.reduce((sum, item) => sum + item.value, 0);
+    if (!total) return dataTipoIngreso;
+
+    const threshold = total * 0.03;
+    const major = [];
+    let others = 0;
+
+    dataTipoIngreso.forEach((item) => {
+      if (item.value < threshold) {
+        others += item.value;
+      } else {
+        major.push(item);
+      }
+    });
+
+    if (others > 0) {
+      major.push({ name: 'Otros', value: others });
     }
 
-    console.log('✅ Registro creado con ID:', recordId);
-    
-    toast.success('Registro guardado correctamente');
+    return major;
+  }, [dataTipoIngreso]);
 
-    // Mostrar modal de éxito
-    setShowSuccessModal(true);
-
-  } catch (error) {
-    console.error('=== ERROR ===');
-    console.error('Error completo:', error);
-    console.error('Error data:', error?.data);
-
-    // 🔥 MENSAJE MÁS INTELIGENTE
-    if (error?.data?.data) {
-      const errores = Object.values(error.data.data)
-        .map(e => e.message)
-        .join(', ');
-
-      toast.error('Error en campos', {
-        description: errores
-      });
-    } else if (error.status === 404) {
-      toast.error('La colección "registros" no existe');
-    } else {
-      toast.error('Error al guardar', {
-        description: error.message || 'Intenta nuevamente'
-      });
-    }
-
-  } finally {
-    setIsSubmitting(false);
-  }
-};
-
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }));
-    }
-  };
-
-  const handleNssChange = (e) => {
-    const value = e.target.value.replace(/\D/g, '').slice(0, 12);
-    handleInputChange('nss', value);
-    
-    if (value.length > 0 && value.length < 11) {
-      setNssFeedback('El NSS suele tener 11 dígitos');
-    } else if (value.length === 12) {
-      setNssFeedback('Límite máximo de caracteres alcanzado');
-    } else {
-      setNssFeedback('');
-    }
-  };
-
-  const resetForm = () => {
-    setFormData(INITIAL_FORM_DATA);
-    setErrors({});
-    setNssFeedback('');
-    setShowSuccessModal(false);
+  const tipoIngresoTooltipFormatter = (value, name) => {
+    const total = dataTipoIngresoChart.reduce((sum, item) => sum + item.value, 0);
+    const percent = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+    return [`${value} (${percent}%)`, name];
   };
 
   return (
     <>
       <Helmet>
-        <title>Captura de registros - MARTCOM CRM</title>
-        <meta name="description" content="Sistema de captura de nuevos registros para MARTCOM" />
+        <title>Métricas y reportes - MARTCOM CRM</title>
+        <meta name="description" content="Dashboard de métricas y análisis de registros" />
       </Helmet>
 
-      <SuccessModal 
-        isOpen={showSuccessModal} 
-        onClose={resetForm} 
-      />
+      <div className="min-h-screen bg-muted/30 py-8">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4 mb-6 bg-white p-4 rounded-xl border shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Clock className="w-4 h-4" />
+                <span>
+                  Última actualización: {lastUpdate ? lastUpdate.toLocaleString('es-MX') : 'Cargando...'}
+                </span>
+              </div>
+              <Button onClick={() => fetchData(true)} variant="secondary" className="w-full sm:w-auto gap-2">
+                <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                Recargar Ahora
+              </Button>
+            </div>
 
-      <div className="min-h-[100dvh] bg-muted/30 py-8 lg:py-12">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
-          <Card className="shadow-lg border-border/50">
-            <CardHeader className="pb-8">
-              <CardTitle className="flex items-center gap-2 text-3xl font-bold tracking-tight">
-                <UserPlus className="w-8 h-8 text-primary" />
-                Captura de registro
-              </CardTitle>
-              <CardDescription className="text-base">
-                Completa la información solicitada para ingresar un nuevo prospecto al sistema.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="titular">Titular <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="titular"
-                      value={formData.titular}
-                      onChange={(e) => handleInputChange('titular', e.target.value.toUpperCase())}
-                      placeholder="NOMBRE COMPLETO"
-                      className="uppercase text-gray-900 font-medium"
-                    />
-                    {errors.titular && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.titular}
-                      </p>
-                    )}
-                  </div>
+            <div className="flex flex-wrap gap-2">
+              {RANGE_OPTIONS.map((range) => (
+                <Button
+                  key={range.key}
+                  variant={selectedRange === range.key ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedRange(range.key)}
+                >
+                  {range.label}
+                </Button>
+              ))}
+            </div>
+          </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="telefono">Teléfono <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="telefono"
-                      type="tel"
-                      value={formData.telefono}
-                      onChange={(e) => handleInputChange('telefono', e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      placeholder="10 DÍGITOS"
-                      maxLength={10}
-                      className="text-gray-900 font-medium font-mono"
-                    />
-                    {errors.telefono && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.telefono}
-                      </p>
-                    )}
-                  </div>
+          {error && (
+            <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-xl flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-destructive">Error de conexión</h4>
+                <p className="text-sm text-destructive/80 mt-1">{error}</p>
+              </div>
+            </div>
+          )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="nss">NSS <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="nss"
-                      type="text"
-                      inputMode="numeric"
-                      value={formData.nss}
-                      onChange={handleNssChange}
-                      placeholder="NÚMERO DE SEGURO SOCIAL"
-                      className="text-gray-900 font-medium font-mono"
-                    />
-                    {errors.nss ? (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.nss}
-                      </p>
-                    ) : nssFeedback ? (
-                      <p className="text-sm text-muted-foreground mt-1">{nssFeedback}</p>
-                    ) : null}
-                  </div>
+          <div className="space-y-6">
+            <div className="text-sm text-muted-foreground">
+              Mostrando métricas para: <span className="font-medium">{RANGE_OPTIONS.find((r) => r.key === selectedRange)?.label}</span>
+            </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="curp">CURP <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="curp"
-                      value={formData.curp}
-                      onChange={(e) => handleInputChange('curp', e.target.value.toUpperCase().slice(0, 18))}
-                      placeholder="18 CARACTERES"
-                      maxLength={18}
-                      className="uppercase text-gray-900 font-medium font-mono"
-                    />
-                    {errors.curp && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.curp}
-                      </p>
-                    )}
-                  </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total de registros</CardTitle>
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalRegistros}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Registros capturados</p>
+                </CardContent>
+              </Card>
 
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="correo">Correo electrónico <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="correo"
-                      type="email"
-                      value={formData.correo}
-                      onChange={(e) => handleInputChange('correo', e.target.value.toLowerCase().replace(/\s/g, ''))}
-                      placeholder="correo@ejemplo.com"
-                      className="text-gray-900 font-medium"
-                    />
-                    {errors.correo && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.correo}
-                      </p>
-                    )}
-                  </div>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Ejecutivos activos</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{dataEjecutivo.length}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Con registros asignados</p>
+                </CardContent>
+              </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="ejecutivo">Ejecutivo <span className="text-destructive">*</span></Label>
-                    <Select value={formData.ejecutivo} onValueChange={(value) => handleInputChange('ejecutivo', value)}>
-                      <SelectTrigger id="ejecutivo" className="font-medium text-gray-900">
-                        <SelectValue placeholder="Selecciona ejecutivo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {EJECUTIVOS.map((ejecutivo) => (
-                          <SelectItem key={ejecutivo} value={ejecutivo}>
-                            {ejecutivo}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.ejecutivo && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.ejecutivo}
-                      </p>
-                    )}
-                  </div>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Planes vendidos</CardTitle>
+                  <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{dataPlan.length}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Tipos de planes</p>
+                </CardContent>
+              </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="plan">Plan <span className="text-destructive">*</span></Label>
-                    <Select value={formData.plan} onValueChange={(value) => handleInputChange('plan', value)}>
-                      <SelectTrigger id="plan" className="font-medium text-gray-900">
-                        <SelectValue placeholder="Selecciona plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PLANES.map((plan) => (
-                          <SelectItem key={plan} value={plan}>
-                            {plan}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.plan && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.plan}
-                      </p>
-                    )}
-                  </div>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Canales (Chats)</CardTitle>
+                  <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{dataChat.length}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Fuentes de ingreso</p>
+                </CardContent>
+              </Card>
+            </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="tipo_ingreso">Tipo de ingreso <span className="text-destructive">*</span></Label>
-                    <Select value={formData.tipo_ingreso} onValueChange={(value) => handleInputChange('tipo_ingreso', value)}>
-                      <SelectTrigger id="tipo_ingreso" className="font-medium text-gray-900">
-                        <SelectValue placeholder="Selecciona tipo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TIPOS_INGRESO.map((tipo) => (
-                          <SelectItem key={tipo} value={tipo}>
-                            {tipo}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.tipo_ingreso && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.tipo_ingreso}
-                      </p>
-                    )}
-                  </div>
+            {totalRegistros === 0 && !isLoading ? (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <p className="text-muted-foreground font-medium text-lg">
+                    No hay registros en la base de datos para generar métricas en este período.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>Historial diario de registros</CardTitle>
+                    <CardDescription>
+                      Evolución diaria de capturas {selectedRange === 'all' ? '(mostrando últimos 30 días)' : ''}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <LineChart data={historialDiario}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="fecha" />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="cantidad" stroke="#148286" strokeWidth={2} dot={{ r: 3 }} name="Registros" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="chat">Chat <span className="text-destructive">*</span></Label>
-                    <Select value={formData.chat} onValueChange={(value) => handleInputChange('chat', value)}>
-                      <SelectTrigger id="chat" className="font-medium text-gray-900">
-                        <SelectValue placeholder="Selecciona chat" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CHATS.map((chat) => (
-                          <SelectItem key={chat} value={chat}>
-                            {chat}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.chat && (
-                      <p className="text-sm text-destructive flex items-center gap-1 mt-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errors.chat}
-                      </p>
-                    )}
-                  </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Registros por Plan</CardTitle>
+                    <CardDescription>Distribución de los planes contratados</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={dataPlan}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {dataPlan.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
 
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="comentarios">Comentarios (Opcional)</Label>
-                    <Textarea
-                      id="comentarios"
-                      value={formData.comentarios}
-                      onChange={(e) => handleInputChange('comentarios', e.target.value)}
-                      placeholder="Notas adicionales sobre el registro..."
-                      className="min-h-[100px] resize-y text-gray-900"
-                    />
-                  </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Registros por Tipo de Ingreso</CardTitle>
+                    <CardDescription>Volumen según el tipo de ingreso del cliente</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={dataTipoIngresoChart}
+                          cx="38%"
+                          cy="50%"
+                          labelLine={false}
+                          outerRadius={90}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {dataTipoIngresoChart.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={tipoIngresoTooltipFormatter} />
+                        <Legend layout="vertical" align="right" verticalAlign="middle" />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
 
-                </div>
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>Registros por Ejecutivo (Top 15)</CardTitle>
+                    <CardDescription>Productividad basada en número de registros capturados</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={dataEjecutivo}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="ejecutivo" angle={-45} textAnchor="end" height={80} interval={0} tick={{ fontSize: 12 }} />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="cantidad" fill="#148286" name="Total registros" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
 
-                <div className="pt-4 border-t">
-                  <Button 
-                    type="submit" 
-                    size="lg"
-                    className="w-full gap-2 text-base font-semibold transition-all"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                        Procesando...
-                      </span>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-5 h-5" />
-                        Finalizar Captura
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>Registros por Chat</CardTitle>
+                    <CardDescription>Distribución de capturas por canal / chat asignado</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={dataChat}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-45} textAnchor="end" height={80} interval={0} tick={{ fontSize: 12 }} />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="value" fill="#FF8042" name="Cantidad" radius={[4, 4, 0, 0]}>
+                          {dataChat.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[(index + 1) % COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </>

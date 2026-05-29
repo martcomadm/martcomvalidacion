@@ -40,6 +40,7 @@ export default function MetricasPage() {
   const [selectedRange, setSelectedRange] = useState('30d');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState('all');
 
   const fetchData = async (isManual = false) => {
     try {
@@ -144,7 +145,24 @@ export default function MetricasPage() {
     };
   }, [registros, selectedRange, customStartDate, customEndDate]);
 
-  const totalRegistros = registrosFiltrados.length;
+  const agentesDisponibles = useMemo(() => {
+    const uniques = Array.from(
+      new Set(
+        registrosFiltrados.map((r) => (r?.ejecutivo?.trim() ? r.ejecutivo.trim() : 'Desconocido'))
+      )
+    ).sort((a, b) => a.localeCompare(b, 'es'));
+    return uniques;
+  }, [registrosFiltrados]);
+
+  const registrosFiltradosPorAgente = useMemo(() => {
+    if (selectedAgent === 'all') return registrosFiltrados;
+    return registrosFiltrados.filter((r) => {
+      const agente = r?.ejecutivo?.trim() ? r.ejecutivo.trim() : 'Desconocido';
+      return agente === selectedAgent;
+    });
+  }, [registrosFiltrados, selectedAgent]);
+
+  const totalRegistros = registrosFiltradosPorAgente.length;
 
   useEffect(() => {
     if (selectedRange !== 'custom') return;
@@ -155,7 +173,7 @@ export default function MetricasPage() {
   }, [selectedRange, customStartDate, customEndDate]);
 
   const dataPlan = Object.entries(
-    registrosFiltrados.reduce((acc, curr) => {
+    registrosFiltradosPorAgente.reduce((acc, curr) => {
       acc[curr.plan] = (acc[curr.plan] || 0) + 1;
       return acc;
     }, {})
@@ -164,7 +182,7 @@ export default function MetricasPage() {
     .filter((item) => item.value > 0);
 
   const dataTipoIngreso = Object.entries(
-    registrosFiltrados.reduce((acc, curr) => {
+    registrosFiltradosPorAgente.reduce((acc, curr) => {
       acc[curr.tipo_ingreso] = (acc[curr.tipo_ingreso] || 0) + 1;
       return acc;
     }, {})
@@ -173,7 +191,7 @@ export default function MetricasPage() {
     .filter((item) => item.value > 0);
 
   const dataChat = Object.entries(
-    registrosFiltrados.reduce((acc, curr) => {
+    registrosFiltradosPorAgente.reduce((acc, curr) => {
       acc[curr.chat] = (acc[curr.chat] || 0) + 1;
       return acc;
     }, {})
@@ -182,7 +200,7 @@ export default function MetricasPage() {
     .filter((item) => item.value > 0);
 
   const dataEjecutivo = Object.entries(
-    registrosFiltrados.reduce((acc, curr) => {
+    registrosFiltradosPorAgente.reduce((acc, curr) => {
       acc[curr.ejecutivo] = (acc[curr.ejecutivo] || 0) + 1;
       return acc;
     }, {})
@@ -259,8 +277,31 @@ export default function MetricasPage() {
         };
       })
       .sort((a, b) => b.totalRegistros - a.totalRegistros)
-      .slice(0, 20);
+      .slice(0, 15);
   }, [registrosFiltrados]);
+
+  const detalleAgente = useMemo(() => {
+    if (selectedAgent === 'all') return null;
+    const items = registrosFiltradosPorAgente;
+    if (!items.length) return null;
+
+    const topFromKey = (key, fallback) => {
+      const counter = items.reduce((acc, curr) => {
+        const value = curr?.[key] || fallback;
+        acc[value] = (acc[value] || 0) + 1;
+        return acc;
+      }, {});
+      return Object.entries(counter).sort((a, b) => b[1] - a[1])[0]?.[0] || fallback;
+    };
+
+    return {
+      agente: selectedAgent,
+      totalRegistros: items.length,
+      planTop: topFromKey('plan', 'Sin Plan'),
+      chatTop: topFromKey('chat', 'Sin Chat'),
+      tipoIngresoTop: topFromKey('tipo_ingreso', 'Sin Tipo')
+    };
+  }, [selectedAgent, registrosFiltradosPorAgente]);
 
   return (
     <>
@@ -350,17 +391,35 @@ export default function MetricasPage() {
           )}
 
           <div className="space-y-6">
-            <div className="text-sm text-muted-foreground">
-              Mostrando métricas para:{' '}
-              <span className="font-medium">
-                {selectedRange === 'custom'
-                  ? customStartDate && customEndDate
-                    ? customStartDate === customEndDate
-                      ? `Día específico (${customStartDate})`
-                      : `Personalizado (${customStartDate} a ${customEndDate})`
-                    : 'Personalizado'
-                  : RANGE_OPTIONS.find((r) => r.key === selectedRange)?.label}
-              </span>
+            <div className="flex flex-col gap-3">
+              <div className="text-sm text-muted-foreground">
+                Mostrando métricas para:{' '}
+                <span className="font-medium">
+                  {selectedRange === 'custom'
+                    ? customStartDate && customEndDate
+                      ? customStartDate === customEndDate
+                        ? `Día específico (${customStartDate})`
+                        : `Personalizado (${customStartDate} a ${customEndDate})`
+                      : 'Personalizado'
+                    : RANGE_OPTIONS.find((r) => r.key === selectedRange)?.label}
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="text-sm text-muted-foreground">Agente:</label>
+                <select
+                  value={selectedAgent}
+                  onChange={(e) => setSelectedAgent(e.target.value)}
+                  className="h-9 rounded-md border px-3 text-sm bg-background w-full sm:w-80"
+                >
+                  <option value="all">Todos</option>
+                  {agentesDisponibles.map((agente) => (
+                    <option key={agente} value={agente}>
+                      {agente}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -428,7 +487,26 @@ export default function MetricasPage() {
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={320}>
-                      <LineChart data={historialDiario}>
+                      <LineChart
+                        data={
+                          selectedAgent === 'all'
+                            ? historialDiario
+                            : Object.entries(
+                                registrosFiltradosPorAgente.reduce((acc, curr) => {
+                                  const date = getRecordDate(curr);
+                                  if (!date) return acc;
+                                  const key = toDateOnly(date).toISOString().split('T')[0];
+                                  acc[key] = (acc[key] || 0) + 1;
+                                  return acc;
+                                }, {})
+                              )
+                                .sort(([a], [b]) => new Date(a) - new Date(b))
+                                .map(([date, cantidad]) => ({
+                                  fecha: formatDateLabel(new Date(date)),
+                                  cantidad
+                                }))
+                        }
+                      >
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="fecha" />
                         <YAxis allowDecimals={false} />
@@ -438,6 +516,35 @@ export default function MetricasPage() {
                     </ResponsiveContainer>
                   </CardContent>
                 </Card>
+
+                {detalleAgente && (
+                  <Card className="lg:col-span-2">
+                    <CardHeader>
+                      <CardTitle>Detalle del agente seleccionado</CardTitle>
+                      <CardDescription>Estadísticas individuales para {detalleAgente.agente}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="p-4 rounded-lg border">
+                          <p className="text-xs text-muted-foreground">Total registros</p>
+                          <p className="text-2xl font-bold">{detalleAgente.totalRegistros}</p>
+                        </div>
+                        <div className="p-4 rounded-lg border">
+                          <p className="text-xs text-muted-foreground">Plan más frecuente</p>
+                          <p className="text-lg font-semibold">{detalleAgente.planTop}</p>
+                        </div>
+                        <div className="p-4 rounded-lg border">
+                          <p className="text-xs text-muted-foreground">Chat más frecuente</p>
+                          <p className="text-lg font-semibold">{detalleAgente.chatTop}</p>
+                        </div>
+                        <div className="p-4 rounded-lg border">
+                          <p className="text-xs text-muted-foreground">Tipo ingreso más frecuente</p>
+                          <p className="text-lg font-semibold">{detalleAgente.tipoIngresoTop}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 <Card>
                   <CardHeader>
@@ -584,4 +691,3 @@ export default function MetricasPage() {
     </>
   );
 }
-

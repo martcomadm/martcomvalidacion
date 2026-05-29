@@ -38,6 +38,8 @@ export default function MetricasPage() {
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [selectedRange, setSelectedRange] = useState('30d');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   const fetchData = async (isManual = false) => {
     try {
@@ -73,7 +75,7 @@ export default function MetricasPage() {
     return () => clearInterval(dailyCheckId);
   }, []);
 
-  const { registrosFiltrados, historialDiario } = useMemo(() => {
+  const { registrosFiltrados, historialDiario, customError } = useMemo(() => {
     const today = toDateOnly(new Date());
     let minDate = null;
 
@@ -87,11 +89,37 @@ export default function MetricasPage() {
       minDate.setDate(minDate.getDate() - 29);
     }
 
+    let customError = null;
+    let customStart = null;
+    let customEnd = null;
+
+    if (selectedRange === 'custom') {
+      if (!customStartDate || !customEndDate) {
+        customError = 'Selecciona fecha de inicio y fin para aplicar el rango personalizado.';
+      } else {
+        const [sy, sm, sd] = customStartDate.split('-').map(Number);
+        const [ey, em, ed] = customEndDate.split('-').map(Number);
+        customStart = new Date(sy, sm - 1, sd);
+        customEnd = new Date(ey, em - 1, ed);
+
+        if (customStart > customEnd) {
+          customError = 'La fecha de inicio no puede ser mayor que la fecha fin.';
+        }
+      }
+    }
+
     const filtered = registros.filter((registro) => {
       const date = getRecordDate(registro);
       if (!date) return false;
+      const normalized = toDateOnly(date);
+
+      if (selectedRange === 'custom') {
+        if (customError || !customStart || !customEnd) return false;
+        return normalized >= customStart && normalized <= customEnd;
+      }
+
       if (!minDate) return true;
-      return toDateOnly(date) >= minDate;
+      return normalized >= minDate;
     });
 
     const byDay = filtered.reduce((acc, curr) => {
@@ -111,11 +139,20 @@ export default function MetricasPage() {
 
     return {
       registrosFiltrados: filtered,
-      historialDiario: selectedRange === 'all' ? sortedHistory.slice(-30) : sortedHistory
+      historialDiario: selectedRange === 'all' ? sortedHistory.slice(-30) : sortedHistory,
+      customError
     };
-  }, [registros, selectedRange]);
+  }, [registros, selectedRange, customStartDate, customEndDate]);
 
   const totalRegistros = registrosFiltrados.length;
+
+  useEffect(() => {
+    if (selectedRange !== 'custom') return;
+    if (!customStartDate || !customEndDate) return;
+    if (customStartDate > customEndDate) {
+      toast.error('La fecha de inicio no puede ser mayor que la fecha fin.');
+    }
+  }, [selectedRange, customStartDate, customEndDate]);
 
   const dataPlan = Object.entries(
     registrosFiltrados.reduce((acc, curr) => {
@@ -259,7 +296,37 @@ export default function MetricasPage() {
                   {range.label}
                 </Button>
               ))}
+              <Button
+                variant={selectedRange === 'custom' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedRange('custom')}
+              >
+                Personalizado
+              </Button>
             </div>
+
+            {selectedRange === 'custom' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Fecha inicio</label>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="w-full h-9 rounded-md border px-3 text-sm bg-background"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Fecha fin</label>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="w-full h-9 rounded-md border px-3 text-sm bg-background"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -272,9 +339,28 @@ export default function MetricasPage() {
             </div>
           )}
 
+          {selectedRange === 'custom' && customError && (
+            <div className="mb-6 p-4 bg-amber-100 border border-amber-300 rounded-xl flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-amber-800">Rango personalizado inválido</h4>
+                <p className="text-sm text-amber-700 mt-1">{customError}</p>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-6">
             <div className="text-sm text-muted-foreground">
-              Mostrando métricas para: <span className="font-medium">{RANGE_OPTIONS.find((r) => r.key === selectedRange)?.label}</span>
+              Mostrando métricas para:{' '}
+              <span className="font-medium">
+                {selectedRange === 'custom'
+                  ? customStartDate && customEndDate
+                    ? customStartDate === customEndDate
+                      ? `Día específico (${customStartDate})`
+                      : `Personalizado (${customStartDate} a ${customEndDate})`
+                    : 'Personalizado'
+                  : RANGE_OPTIONS.find((r) => r.key === selectedRange)?.label}
+              </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -498,3 +584,4 @@ export default function MetricasPage() {
     </>
   );
 }
+

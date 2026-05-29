@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Helmet } from 'react-helmet';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { TrendingUp, Users, RefreshCw, AlertCircle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
@@ -184,6 +185,45 @@ export default function MetricasPage() {
     const percent = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
     return [`${value} (${percent}%)`, name];
   };
+
+  const statsPorAgente = useMemo(() => {
+    const acc = registrosFiltrados.reduce((map, curr) => {
+      const agente = curr?.ejecutivo?.trim() ? curr.ejecutivo.trim() : 'Desconocido';
+
+      if (!map[agente]) {
+        map[agente] = {
+          agente,
+          totalRegistros: 0,
+          planes: new Set(),
+          chats: new Set(),
+          tipoIngresoCount: {}
+        };
+      }
+
+      map[agente].totalRegistros += 1;
+      if (curr?.plan) map[agente].planes.add(curr.plan);
+      if (curr?.chat) map[agente].chats.add(curr.chat);
+
+      const tipo = curr?.tipo_ingreso || 'Sin Tipo';
+      map[agente].tipoIngresoCount[tipo] = (map[agente].tipoIngresoCount[tipo] || 0) + 1;
+
+      return map;
+    }, {});
+
+    return Object.values(acc)
+      .map((item) => {
+        const tipoIngresoTop = Object.entries(item.tipoIngresoCount).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Sin Tipo';
+        return {
+          agente: item.agente,
+          totalRegistros: item.totalRegistros,
+          planesDistintos: item.planes.size,
+          chatsDistintos: item.chats.size,
+          tipoIngresoTop
+        };
+      })
+      .sort((a, b) => b.totalRegistros - a.totalRegistros)
+      .slice(0, 20);
+  }, [registrosFiltrados]);
 
   return (
     <>
@@ -409,6 +449,47 @@ export default function MetricasPage() {
                     </ResponsiveContainer>
                   </CardContent>
                 </Card>
+
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>Estadísticas por agente (Top 20)</CardTitle>
+                    <CardDescription>Resumen de desempeño por ejecutivo en el período seleccionado</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Agente</TableHead>
+                            <TableHead className="text-right">Total registros</TableHead>
+                            <TableHead className="text-right">Planes distintos</TableHead>
+                            <TableHead className="text-right">Chats distintos</TableHead>
+                            <TableHead>Tipo ingreso top</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {statsPorAgente.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                                Sin datos para mostrar en este período.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            statsPorAgente.map((item) => (
+                              <TableRow key={item.agente}>
+                                <TableCell className="font-medium">{item.agente}</TableCell>
+                                <TableCell className="text-right">{item.totalRegistros}</TableCell>
+                                <TableCell className="text-right">{item.planesDistintos}</TableCell>
+                                <TableCell className="text-right">{item.chatsDistintos}</TableCell>
+                                <TableCell>{item.tipoIngresoTop}</TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             )}
           </div>
@@ -417,5 +498,3 @@ export default function MetricasPage() {
     </>
   );
 }
-
-

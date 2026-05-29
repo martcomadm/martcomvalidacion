@@ -156,6 +156,35 @@ export default function MetricasPage() {
     .sort((a, b) => b.cantidad - a.cantidad)
     .slice(0, 15);
 
+  const dataTipoIngresoChart = useMemo(() => {
+    const total = dataTipoIngreso.reduce((sum, item) => sum + item.value, 0);
+    if (!total) return dataTipoIngreso;
+
+    const threshold = total * 0.03;
+    const major = [];
+    let others = 0;
+
+    dataTipoIngreso.forEach((item) => {
+      if (item.value < threshold) {
+        others += item.value;
+      } else {
+        major.push(item);
+      }
+    });
+
+    if (others > 0) {
+      major.push({ name: 'Otros', value: others });
+    }
+
+    return major;
+  }, [dataTipoIngreso]);
+
+  const tipoIngresoTooltipFormatter = (value, name) => {
+    const total = dataTipoIngresoChart.reduce((sum, item) => sum + item.value, 0);
+    const percent = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+    return [`${value} (${percent}%)`, name];
+  };
+
   return (
     <>
       <Helmet>
@@ -322,21 +351,20 @@ export default function MetricasPage() {
                     <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
                         <Pie
-                          data={dataTipoIngreso}
-                          cx="50%"
+                          data={dataTipoIngresoChart}
+                          cx="38%"
                           cy="50%"
                           labelLine={false}
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={80}
+                          outerRadius={90}
                           fill="#8884d8"
                           dataKey="value"
                         >
-                          {dataTipoIngreso.map((entry, index) => (
+                          {dataTipoIngresoChart.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip />
-                        <Legend />
+                        <Tooltip formatter={tipoIngresoTooltipFormatter} />
+                        <Legend layout="vertical" align="right" verticalAlign="middle" />
                       </PieChart>
                     </ResponsiveContainer>
                   </CardContent>
@@ -389,4 +417,5 @@ export default function MetricasPage() {
     </>
   );
 }
+
 

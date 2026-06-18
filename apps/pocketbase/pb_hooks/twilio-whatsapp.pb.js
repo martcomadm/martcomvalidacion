@@ -17,7 +17,7 @@
 
 onRecordAfterCreateSuccess((e) => {
     // Solo para la colección objetivo
-    if (e.record.collection().name !== "datostwilo") {
+    if (e.record.collection().name !== "registros") {
         return e.next()
     }
 

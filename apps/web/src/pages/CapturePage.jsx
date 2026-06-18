@@ -92,81 +92,79 @@ export default function CapturePage() {
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (!validateForm()) {
-    toast.error('Por favor corrige los errores en el formulario');
-    return;
-  }
-
-  setIsSubmitting(true);
-
-  try {
-    const now = new Date();
-    const fecha_registro = now.toISOString().split('T')[0];
-    const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
-
-    const payload = {
-      ...formData,
-      fecha_registro,
-      hora_registro
-    };
-
-    console.log('=== INICIO CREACIÓN DE REGISTRO ===');
-    console.log('Payload enviado:', payload);
-
-    const response = await pb.collection('registros').create(payload, {
-    $autoCancel: false
-    });
-
-    console.log('=== RESPUESTA DEL SERVIDOR ===');
-    console.log('RESPONSE KEYS:', Object.keys(response));
-    console.log('RESPONSE COMPLETO:', response);
-
-    // 🔥 DETECTAR ID CORRECTAMENTE
-    const recordId = response?.id || response?.data?.id;
-
-    console.log('ID detectado:', recordId);
-
-    // ✅ VALIDACIÓN CORRECTA
-    if (!recordId) {
-    console.error('❌ Respuesta inválida:', response);
-    throw new Error('No se pudo crear el registro');
+    if (!validateForm()) {
+      toast.error('Por favor corrige los errores en el formulario');
+      return;
     }
 
-    console.log('✅ Registro creado con ID:', recordId);
+    setIsSubmitting(true);
 
-    toast.success('Registro guardado correctamente');
+    try {
+      const now = new Date();
+      const fecha_registro = now.toISOString().split('T')[0];
+      const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
 
-    // Mostrar modal de éxito
-    setShowSuccessModal(true);
+      const payload = {
+        ...formData,
+        fecha_registro,
+        hora_registro
+      };
 
-  } catch (error) {
-    console.error('=== ERROR ===');
-    console.error('Error completo:', error);
-    console.error('Error data:', error?.data);
+      console.log('=== INICIO CREACIÓN DE REGISTRO ===');
+      console.log('Payload enviado:', payload);
 
-    // 🔥 MENSAJE MÁS INTELIGENTE
-    if (error?.data?.data) {
-      const errores = Object.values(error.data.data)
-        .map(e => e.message)
-        .join(', ');
-
-      toast.error('Error en campos', {
-        description: errores
+      const response = await pb.collection('registros').create(payload, {
+        $autoCancel: false
       });
-    } else if (error.status === 404) {
-      toast.error('La colección "registros" no existe');
-    } else {
-      toast.error('Error al guardar', {
-        description: error.message || 'Intenta nuevamente'
-      });
+
+      console.log('=== RESPUESTA DEL SERVIDOR ===');
+      console.log('RESPONSE KEYS:', Object.keys(response || {}));
+      console.log('RESPONSE COMPLETO:', response);
+
+      const recordId = response?.id || response?.data?.id;
+
+      if (!recordId) {
+        console.error('❌ Respuesta inválida:', response);
+        throw new Error('No se pudo crear el registro');
+      }
+
+      console.log('✅ Registro creado con ID:', recordId);
+
+      toast.success('Registro guardado correctamente');
+      setShowSuccessModal(true);
+    } catch (error) {
+      console.error('=== ERROR ===');
+      console.error('Error completo:', error);
+      console.error('Error data:', error?.data);
+
+      // Si PocketBase devolvió validaciones por campo
+      if (error?.data?.data && typeof error.data.data === 'object') {
+        const errores = Object.values(error.data.data)
+          .map((e) => e?.message)
+          .filter(Boolean)
+          .join(', ');
+
+        toast.error('Error en campos', {
+          description: errores || 'Verifica la información capturada'
+        });
+      } else if (error?.status === 404) {
+        toast.error('La colección "registros" no existe');
+      } else if (error?.status === 0 || error?.isAbort) {
+        // Evita falso negativo cuando hay cancelación/interrupción de request en cliente
+        toast.error('Conexión interrumpida', {
+          description: 'Verifica en historial si el registro se guardó y vuelve a intentar.'
+        });
+      } else {
+        toast.error('Error al guardar', {
+          description: error?.message || 'Intenta nuevamente'
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));

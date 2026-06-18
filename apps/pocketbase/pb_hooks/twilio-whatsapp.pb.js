@@ -1,5 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 
+$app.logger().info("Hook cargado: twilio-whatsapp.pb.js")
+
 /**
  * Hook: Enviar notificación por WhatsApp (Twilio) al crear un registro en `registros`.
  *

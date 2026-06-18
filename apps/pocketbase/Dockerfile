@@ -13,8 +13,8 @@ RUN wget https://github.com/pocketbase/pocketbase/releases/download/v0.23.0/pock
     && chmod +x pocketbase \
     && rm pocketbase_0.23.0_linux_amd64.zip
 
-COPY apps/pocketbase/ .
+COPY . .
 
 EXPOSE 8090
 
-CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--origins=*", "--hooksDir=./pb_hooks"]
+CMD ["./pocketbase", "serve", "--http=0.0.0.0:8090", "--http-cors=*"]

@@ -51,6 +51,7 @@ export default function CapturePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [nssFeedback, setNssFeedback] = useState('');
+  const [lastCreatedRecordId, setLastCreatedRecordId] = useState(null);
 
   const validateForm = () => {
     const newErrors = {};
@@ -130,6 +131,7 @@ export default function CapturePage() {
         throw new Error('No se pudo crear el registro');
       }
 
+      setLastCreatedRecordId(recordId);
       console.log('✅ Registro creado con ID:', recordId);
 
       toast.success('Registro guardado correctamente');
@@ -139,8 +141,17 @@ export default function CapturePage() {
       console.error('Error completo:', error);
       console.error('Error data:', error?.data);
 
-      // Si PocketBase devolvió validaciones por campo
-      if (error?.data?.data && typeof error.data.data === 'object') {
+      // Si ya hubo creación exitosa, no mostrar falso error.
+      if (lastCreatedRecordId) {
+        console.warn('Se detectó excepción posterior a creación; se evita falso negativo.', {
+          lastCreatedRecordId,
+          error
+        });
+        toast.success('Registro guardado correctamente', {
+          description: `Folio: ${lastCreatedRecordId}`
+        });
+        setShowSuccessModal(true);
+      } else if (error?.data?.data && typeof error.data.data === 'object') {
         const errores = Object.values(error.data.data)
           .map((e) => e?.message)
           .filter(Boolean)
@@ -191,6 +202,7 @@ export default function CapturePage() {
     setErrors({});
     setNssFeedback('');
     setShowSuccessModal(false);
+    setLastCreatedRecordId(null);
   };
 
   return (

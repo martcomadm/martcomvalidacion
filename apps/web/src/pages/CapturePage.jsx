@@ -51,7 +51,6 @@ export default function CapturePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [nssFeedback, setNssFeedback] = useState('');
-  const [lastCreatedRecordId, setLastCreatedRecordId] = useState(null);
 
   const validateForm = () => {
     const newErrors = {};
@@ -93,89 +92,81 @@ export default function CapturePage() {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+  e.preventDefault();
 
-    if (!validateForm()) {
-      toast.error('Por favor corrige los errores en el formulario');
-      return;
+  if (!validateForm()) {
+    toast.error('Por favor corrige los errores en el formulario');
+    return;
+  }
+
+  setIsSubmitting(true);
+
+  try {
+    const now = new Date();
+    const fecha_registro = now.toISOString().split('T')[0];
+    const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
+
+    const payload = {
+      ...formData,
+      fecha_registro,
+      hora_registro
+    };
+
+    console.log('=== INICIO CREACIÓN DE REGISTRO ===');
+    console.log('Payload enviado:', payload);
+
+    const response = await pb.collection('registros').create(payload, {
+    $autoCancel: false
+    });
+
+    console.log('=== RESPUESTA DEL SERVIDOR ===');
+    console.log('RESPONSE KEYS:', Object.keys(response));
+    console.log('RESPONSE COMPLETO:', response);
+
+    // 🔥 DETECTAR ID CORRECTAMENTE
+    const recordId = response?.id || response?.data?.id;
+
+    console.log('ID detectado:', recordId);
+
+    // ✅ VALIDACIÓN CORRECTA
+    if (!recordId) {
+    console.error('❌ Respuesta inválida:', response);
+    throw new Error('No se pudo crear el registro');
     }
 
-    setIsSubmitting(true);
+    console.log('✅ Registro creado con ID:', recordId);
 
-    try {
-      const now = new Date();
-      const fecha_registro = now.toISOString().split('T')[0];
-      const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
+    toast.success('Registro guardado correctamente');
 
-      const payload = {
-        ...formData,
-        fecha_registro,
-        hora_registro
-      };
+    // Mostrar modal de éxito
+    setShowSuccessModal(true);
 
-      console.log('=== INICIO CREACIÓN DE REGISTRO ===');
-      console.log('Payload enviado:', payload);
+  } catch (error) {
+    console.error('=== ERROR ===');
+    console.error('Error completo:', error);
+    console.error('Error data:', error?.data);
 
-      const response = await pb.collection('registros').create(payload, {
-        $autoCancel: false
+    // 🔥 MENSAJE MÁS INTELIGENTE
+    if (error?.data?.data) {
+      const errores = Object.values(error.data.data)
+        .map(e => e.message)
+        .join(', ');
+
+      toast.error('Error en campos', {
+        description: errores
       });
-
-      console.log('=== RESPUESTA DEL SERVIDOR ===');
-      console.log('RESPONSE KEYS:', Object.keys(response || {}));
-      console.log('RESPONSE COMPLETO:', response);
-
-      const recordId = response?.id || response?.data?.id;
-
-      if (!recordId) {
-        console.error('❌ Respuesta inválida:', response);
-        throw new Error('No se pudo crear el registro');
-      }
-
-      setLastCreatedRecordId(recordId);
-      console.log('✅ Registro creado con ID:', recordId);
-
-      toast.success('Registro guardado correctamente');
-      setShowSuccessModal(true);
-    } catch (error) {
-      console.error('=== ERROR ===');
-      console.error('Error completo:', error);
-      console.error('Error data:', error?.data);
-
-      // Si ya hubo creación exitosa, no mostrar falso error.
-      if (lastCreatedRecordId) {
-        console.warn('Se detectó excepción posterior a creación; se evita falso negativo.', {
-          lastCreatedRecordId,
-          error
-        });
-        toast.success('Registro guardado correctamente', {
-          description: `Folio: ${lastCreatedRecordId}`
-        });
-        setShowSuccessModal(true);
-      } else if (error?.data?.data && typeof error.data.data === 'object') {
-        const errores = Object.values(error.data.data)
-          .map((e) => e?.message)
-          .filter(Boolean)
-          .join(', ');
-
-        toast.error('Error en campos', {
-          description: errores || 'Verifica la información capturada'
-        });
-      } else if (error?.status === 404) {
-        toast.error('La colección "registros" no existe');
-      } else if (error?.status === 0 || error?.isAbort) {
-        // Evita falso negativo cuando hay cancelación/interrupción de request en cliente
-        toast.error('Conexión interrumpida', {
-          description: 'Verifica en historial si el registro se guardó y vuelve a intentar.'
-        });
-      } else {
-        toast.error('Error al guardar', {
-          description: error?.message || 'Intenta nuevamente'
-        });
-      }
-    } finally {
-      setIsSubmitting(false);
+    } else if (error.status === 404) {
+      toast.error('La colección "registros" no existe');
+    } else {
+      toast.error('Error al guardar', {
+        description: error.message || 'Intenta nuevamente'
+      });
     }
-  };
+
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -202,7 +193,6 @@ export default function CapturePage() {
     setErrors({});
     setNssFeedback('');
     setShowSuccessModal(false);
-    setLastCreatedRecordId(null);
   };
 
   return (

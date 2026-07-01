@@ -8,10 +8,10 @@ RUN apk add --no-cache unzip wget
 RUN rm -f pocketbase
 
 # descargar versión nueva
-RUN wget https://github.com/pocketbase/pocketbase/releases/download/v0.23.0/pocketbase_0.23.0_linux_amd64.zip \
-    && unzip pocketbase_0.23.0_linux_amd64.zip \
+RUN wget https://github.com/pocketbase/pocketbase/releases/download/v0.36.7/pocketbase_0.36.7_linux_amd64.zip \
+    && unzip pocketbase_0.36.7_linux_amd64.zip \
     && chmod +x pocketbase \
-    && rm pocketbase_0.23.0_linux_amd64.zip
+    && rm pocketbase_0.36.7_linux_amd64.zip
 
 COPY . .
 

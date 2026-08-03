@@ -8,11 +8,18 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Save, AlertTriangle, AlertCircle, Search, RefreshCw, Clock } from 'lucide-react';
+import { Save, AlertTriangle, AlertCircle, Search, RefreshCw, Clock, Download, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
+import * as XLSX from 'xlsx';
 import pb from '@/lib/pocketbaseClient';
+
+const getRecordDate = (registro) => {
+  const rawDate = registro.fecha_registro || registro.created;
+  if (!rawDate) return '';
+  return rawDate.slice(0, 10);
+};
 
 export default function SeguimientoPage() {
   const [registros, setRegistros] = useState([]);
@@ -23,6 +30,8 @@ export default function SeguimientoPage() {
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   
   const [editingRow, setEditingRow] = useState(null);
   const [editData, setEditData] = useState({});
@@ -107,18 +116,69 @@ export default function SeguimientoPage() {
   }, [editingRow]);
 
   useEffect(() => {
-    if (!searchTerm) {
-      setFilteredRegistros(registros);
+    const term = searchTerm.toLowerCase();
+    const filtered = registros.filter((r) => {
+      const matchesSearch = !term ||
+        r.titular?.toLowerCase().includes(term) ||
+        r.telefono?.includes(term) ||
+        r.ejecutivo?.toLowerCase().includes(term);
+      const recordDate = getRecordDate(r);
+      const matchesStartDate = !startDate || (recordDate && recordDate >= startDate);
+      const matchesEndDate = !endDate || (recordDate && recordDate <= endDate);
+
+      return matchesSearch && matchesStartDate && matchesEndDate;
+    });
+    setFilteredRegistros(filtered);
+  }, [registros, searchTerm, startDate, endDate]);
+
+  const clearDateFilter = () => {
+    setStartDate('');
+    setEndDate('');
+  };
+
+  const exportToExcel = () => {
+    if (startDate && endDate && startDate > endDate) {
+      toast.error('La fecha inicial no puede ser posterior a la fecha final');
       return;
     }
-    const term = searchTerm.toLowerCase();
-    const filtered = registros.filter(r => 
-      r.titular?.toLowerCase().includes(term) ||
-      r.telefono?.includes(term) ||
-      r.ejecutivo?.toLowerCase().includes(term)
-    );
-    setFilteredRegistros(filtered);
-  }, [registros, searchTerm]);
+
+    if (filteredRegistros.length === 0) {
+      toast.error('No hay registros visibles para exportar');
+      return;
+    }
+
+    const dataToExport = filteredRegistros.map((registro) => ({
+      'Fecha captura': formatDateTime(
+        registro.fecha_registro || (registro.created ? registro.created.split(' ')[0] : ''),
+        registro.hora_registro
+      ),
+      Titular: registro.titular || '',
+      'Teléfono': registro.telefono || '',
+      Plan: registro.plan || '',
+      Ejecutivo: registro.ejecutivo || '',
+      'Comentarios (Captura)': registro.comentarios || '',
+      Llamada: registro.llamada || '',
+      Correo: registro.correo_electronico || '',
+      'Términos': registro.terminos_condiciones || '',
+      'Observaciones (Admin)': registro.observaciones_admin || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    worksheet['!autofilter'] = { ref: worksheet['!ref'] };
+    worksheet['!cols'] = [
+      { wch: 20 }, { wch: 30 }, { wch: 16 }, { wch: 22 }, { wch: 24 },
+      { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 45 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Seguimiento');
+
+    const rangeLabel = startDate || endDate
+      ? `${startDate || 'inicio'}_a_${endDate || 'hoy'}`
+      : format(new Date(), 'yyyy-MM-dd');
+    XLSX.writeFile(workbook, `seguimiento_martcom_${rangeLabel}.xlsx`);
+    toast.success(`${filteredRegistros.length} registro${filteredRegistros.length === 1 ? '' : 's'} exportado${filteredRegistros.length === 1 ? '' : 's'}`);
+  };
 
   const startEditing = (registro) => {
     if (!solicitarClave()) return; // 🔐 AQUÍ SE VALIDA LA CLAVE
@@ -302,14 +362,62 @@ export default function SeguimientoPage() {
                   )}
                 </div>
                 
-                <div className="relative w-full md:w-72">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Filtrar por titular o teléfono..."
-                    className="pl-9 bg-white"
-                  />
+                <div className="flex flex-col gap-3 w-full md:w-auto">
+                  <div className="relative w-full md:w-80 md:self-end">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Filtrar por titular o teléfono..."
+                      className="pl-9 bg-white"
+                    />
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                    <div className="space-y-1">
+                      <label htmlFor="seguimiento-desde" className="text-xs font-medium text-muted-foreground">Desde</label>
+                      <Input
+                        id="seguimiento-desde"
+                        type="date"
+                        value={startDate}
+                        max={endDate || undefined}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="bg-white sm:w-[155px]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label htmlFor="seguimiento-hasta" className="text-xs font-medium text-muted-foreground">Hasta</label>
+                      <Input
+                        id="seguimiento-hasta"
+                        type="date"
+                        value={endDate}
+                        min={startDate || undefined}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="bg-white sm:w-[155px]"
+                      />
+                    </div>
+                    {(startDate || endDate) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={clearDateFilter}
+                        title="Limpiar rango de fechas"
+                        aria-label="Limpiar rango de fechas"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={exportToExcel}
+                      disabled={isLoading || filteredRegistros.length === 0}
+                      className="gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      Exportar ({filteredRegistros.length})
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardHeader>

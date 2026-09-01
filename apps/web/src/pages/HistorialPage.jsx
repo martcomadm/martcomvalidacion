@@ -1,39 +1,87 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Label } from '@/components/ui/label';
-import { Download, Search, RefreshCw, AlertCircle, Clock } from 'lucide-react';
+import { Download, Search, RefreshCw, AlertCircle, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
 import pb from '@/lib/pocketbaseClient';
 
+const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 400;
+
 export default function HistorialPage() {
   const [registros, setRegistros] = useState([]);
-  const [filteredRegistros, setFilteredRegistros] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
-  const fetchRegistros = async (isManual = false) => {
+  const currentPageRef = useRef(1);
+  const searchTermRef = useRef('');
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  useEffect(() => {
+    searchTermRef.current = debouncedSearchTerm;
+  }, [debouncedSearchTerm]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim());
+      setCurrentPage(1);
+      currentPageRef.current = 1;
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const buildSearchFilter = (term) => {
+    if (!term) return '';
+
+    return pb.filter(
+      'titular ~ {:search} || telefono ~ {:search} || ejecutivo ~ {:search} || correo ~ {:search} || curp ~ {:search} || nss ~ {:search}',
+      { search: term }
+    );
+  };
+
+  const fetchRegistros = async (
+    isManual = false,
+    page = currentPageRef.current,
+    term = searchTermRef.current
+  ) => {
     try {
       if (isManual) setIsLoading(true);
       setError(null);
-      
-      const result = await pb.collection('registros').getList(1, 500, {
+
+      const filter = buildSearchFilter(term);
+      const result = await pb.collection('registros').getList(page, PAGE_SIZE, {
         sort: '-created',
+        filter: filter || undefined,
         $autoCancel: false
       });
-      
-      console.log('Registros obtenidos:', result.items);
-      console.log('Total de registros:', result.items.length);
-      
+
+      // Si una eliminación deja la página actual fuera de rango, vuelve a la última página válida.
+      if (result.totalPages > 0 && page > result.totalPages) {
+        const safePage = result.totalPages;
+        setCurrentPage(safePage);
+        currentPageRef.current = safePage;
+        return;
+      }
+
       setRegistros(result.items);
+      setTotalItems(result.totalItems);
+      setTotalPages(Math.max(result.totalPages, 1));
       setLastUpdate(new Date());
     } catch (err) {
       console.error('Error al cargar registros:', err);
@@ -44,43 +92,51 @@ export default function HistorialPage() {
     }
   };
 
+  // Carga inicial y recarga cuando cambia la página o la búsqueda ya estabilizada.
   useEffect(() => {
-    // Initial fetch
-    fetchRegistros(true);
+    currentPageRef.current = currentPage;
+    searchTermRef.current = debouncedSearchTerm;
+    fetchRegistros(true, currentPage, debouncedSearchTerm);
+  }, [currentPage, debouncedSearchTerm]);
 
-    // Auto-refresh interval (5 seconds)
-    const intervalId = setInterval(() => {
-      fetchRegistros(false);
-    }, 5000);
+  // Realtime: sustituye el polling de 5 segundos.
+  useEffect(() => {
+    let unsubscribe = null;
+    let isMounted = true;
 
-    return () => clearInterval(intervalId);
+    const subscribeToRegistros = async () => {
+      try {
+        unsubscribe = await pb.collection('registros').subscribe('*', () => {
+          if (!isMounted) return;
+          fetchRegistros(false, currentPageRef.current, searchTermRef.current);
+        });
+      } catch (err) {
+        console.error('Error al activar realtime:', err);
+        if (isMounted) {
+          toast.error('No se pudo activar la actualización en tiempo real');
+        }
+      }
+    };
+
+    subscribeToRegistros();
+
+    return () => {
+      isMounted = false;
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      } else {
+        pb.collection('registros').unsubscribe('*').catch(() => {});
+      }
+    };
   }, []);
 
-  useEffect(() => {
-    if (!searchTerm) {
-      setFilteredRegistros(registros);
-      return;
-    }
-
-    const term = searchTerm.toLowerCase();
-    const filtered = registros.filter(r => 
-      r.titular?.toLowerCase().includes(term) ||
-      r.telefono?.includes(term) ||
-      r.ejecutivo?.toLowerCase().includes(term) ||
-      r.correo?.toLowerCase().includes(term) ||
-      r.curp?.toLowerCase().includes(term) ||
-      r.nss?.toLowerCase().includes(term)
-    );
-    setFilteredRegistros(filtered);
-  }, [registros, searchTerm]);
-
   const exportToExcel = () => {
-    if (filteredRegistros.length === 0) {
+    if (registros.length === 0) {
       toast.error('No hay registros para exportar');
       return;
     }
 
-    const dataToExport = filteredRegistros.map(r => ({
+    const dataToExport = registros.map(r => ({
       'Fecha': r.fecha_registro || (r.created ? r.created.split(' ')[0] : ''),
       'Hora': r.hora_registro || (r.created ? r.created.split(' ')[1] : ''),
       'Titular': r.titular,
@@ -100,7 +156,7 @@ export default function HistorialPage() {
     XLSX.utils.book_append_sheet(wb, ws, 'Registros');
 
     XLSX.writeFile(wb, `registros_martcom_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-    toast.success('Reporte exportado exitosamente');
+    toast.success('Página actual exportada exitosamente');
   };
 
   const formatDateTime = (dateStr, timeStr) => {
@@ -114,6 +170,14 @@ export default function HistorialPage() {
     }
   };
 
+  const goToPreviousPage = () => {
+    setCurrentPage(page => Math.max(1, page - 1));
+  };
+
+  const goToNextPage = () => {
+    setCurrentPage(page => Math.min(totalPages, page + 1));
+  };
+
   return (
     <>
       <Helmet>
@@ -123,22 +187,26 @@ export default function HistorialPage() {
 
       <div className="min-h-[100dvh] bg-muted/30 py-8">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 bg-white p-4 rounded-xl border shadow-sm">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="w-4 h-4" />
               <span>
                 Última actualización: {lastUpdate ? lastUpdate.toLocaleTimeString('es-MX') : 'Cargando...'}
               </span>
+              <span className="hidden sm:inline text-emerald-600 font-medium">• Realtime activo</span>
             </div>
             <div className="flex gap-2 w-full sm:w-auto">
-              <Button onClick={() => fetchRegistros(true)} variant="secondary" className="flex-1 sm:flex-none gap-2">
+              <Button
+                onClick={() => fetchRegistros(true, currentPage, debouncedSearchTerm)}
+                variant="secondary"
+                className="flex-1 sm:flex-none gap-2"
+              >
                 <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                 Recargar Ahora
               </Button>
               <Button onClick={exportToExcel} variant="outline" className="flex-1 sm:flex-none gap-2">
                 <Download className="w-4 h-4" />
-                Exportar
+                Exportar página
               </Button>
             </div>
           </div>
@@ -159,15 +227,17 @@ export default function HistorialPage() {
                 <div>
                   <CardTitle className="text-2xl font-bold tracking-tight">Historial de registros</CardTitle>
                   <CardDescription className="text-base mt-1">
-                    Mostrando todos los registros ({registros.length} en total).
+                    {debouncedSearchTerm
+                      ? `${totalItems} resultado${totalItems === 1 ? '' : 's'} para “${debouncedSearchTerm}”.`
+                      : `${totalItems} registros en total.`}
                   </CardDescription>
                 </div>
-                <div className="relative w-full md:w-72">
+                <div className="relative w-full md:w-80">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Buscar registro..."
+                    placeholder="Buscar nombre, NSS, CURP, teléfono..."
                     className="pl-9 text-gray-900 bg-white"
                   />
                 </div>
@@ -202,28 +272,38 @@ export default function HistorialPage() {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ) : filteredRegistros.length === 0 ? (
+                      ) : registros.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={11} className="text-center py-12 text-muted-foreground font-medium">
-                            {registros.length === 0 ? 'No hay registros en la base de datos' : 'No se encontraron registros que coincidan con la búsqueda.'}
+                            {debouncedSearchTerm
+                              ? 'No se encontraron registros que coincidan con la búsqueda.'
+                              : 'No hay registros en la base de datos'}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredRegistros.map((registro) => (
+                        registros.map((registro) => (
                           <TableRow key={registro.id} className="hover:bg-muted/30 transition-colors">
                             <TableCell className="font-medium text-xs whitespace-nowrap">
-                              {formatDateTime(registro.fecha_registro || (registro.created ? registro.created.split(' ')[0] : ''), registro.hora_registro)}
+                              {formatDateTime(
+                                registro.fecha_registro || (registro.created ? registro.created.split(' ')[0] : ''),
+                                registro.hora_registro
+                              )}
                             </TableCell>
                             <TableCell className="font-semibold">{registro.titular}</TableCell>
                             <TableCell className="font-mono text-sm">{registro.telefono}</TableCell>
                             <TableCell className="font-mono text-sm">{registro.nss}</TableCell>
                             <TableCell className="font-mono text-sm">{registro.curp}</TableCell>
-                            <TableCell className="max-w-[200px] truncate text-sm" title={registro.correo}>{registro.correo}</TableCell>
+                            <TableCell className="max-w-[200px] truncate text-sm" title={registro.correo}>
+                              {registro.correo}
+                            </TableCell>
                             <TableCell className="text-sm">{registro.ejecutivo}</TableCell>
                             <TableCell className="text-sm">{registro.plan}</TableCell>
                             <TableCell className="text-sm">{registro.tipo_ingreso}</TableCell>
                             <TableCell className="text-sm">{registro.chat}</TableCell>
-                            <TableCell className="text-sm text-muted-foreground max-w-[300px] truncate" title={registro.comentarios}>
+                            <TableCell
+                              className="text-sm text-muted-foreground max-w-[300px] truncate"
+                              title={registro.comentarios}
+                            >
                               {registro.comentarios || '-'}
                             </TableCell>
                           </TableRow>
@@ -231,6 +311,34 @@ export default function HistorialPage() {
                       )}
                     </TableBody>
                   </Table>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-5">
+                <p className="text-sm text-muted-foreground">
+                  Página {currentPage} de {totalPages} · hasta {PAGE_SIZE} registros por página
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToPreviousPage}
+                    disabled={currentPage <= 1 || isLoading}
+                    className="gap-1"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToNextPage}
+                    disabled={currentPage >= totalPages || isLoading}
+                    className="gap-1"
+                  >
+                    Siguiente
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
             </CardContent>

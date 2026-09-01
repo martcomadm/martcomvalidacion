@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -8,94 +7,134 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Save, AlertTriangle, AlertCircle, Search, RefreshCw, Clock, Download, X } from 'lucide-react';
+import { Save, AlertTriangle, AlertCircle, Search, RefreshCw, Clock, Download, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
 import pb from '@/lib/pocketbaseClient';
 
-const getRecordDate = (registro) => {
-  const rawDate = registro.fecha_registro || registro.created;
-  if (!rawDate) return '';
-  return rawDate.slice(0, 10);
-};
+const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 400;
 
 export default function SeguimientoPage() {
   const [registros, setRegistros] = useState([]);
-  const [filteredRegistros, setFilteredRegistros] = useState([]);
   const [duplicatePhones, setDuplicatePhones] = useState(new Set());
-  
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+
   const [editingRow, setEditingRow] = useState(null);
   const [editData, setEditData] = useState({});
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchData = async (isManual = false) => {
+  const currentPageRef = useRef(1);
+  const filtersRef = useRef({ term: '', startDate: '', endDate: '' });
+  const editingRowRef = useRef(null);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  useEffect(() => {
+    editingRowRef.current = editingRow;
+  }, [editingRow]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm.trim());
+      setCurrentPage(1);
+      currentPageRef.current = 1;
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const buildFilter = (term, fromDate, toDate) => {
+    const filters = [];
+
+    if (term) {
+      filters.push(
+        pb.filter(
+          '(titular ~ {:search} || telefono ~ {:search} || ejecutivo ~ {:search})',
+          { search: term }
+        )
+      );
+    }
+
+    if (fromDate) {
+      filters.push(pb.filter('fecha_registro >= {:startDate}', { startDate: fromDate }));
+    }
+
+    if (toDate) {
+      filters.push(pb.filter('fecha_registro <= {:endDate}', { endDate: toDate }));
+    }
+
+    return filters.join(' && ');
+  };
+
+  const fetchDuplicatePhones = async () => {
     try {
-      if (isManual) setIsLoading(true);
-      setError(null);
-      
-      console.log('=== INICIO CARGA DE REGISTROS ===');
-      console.log('Colección: registros');
-      
-      const registrosResult = await pb.collection('registros').getList(1, 500, {
-        sort: '-created',
+      const allPhones = await pb.collection('registros').getFullList({
+        fields: 'telefono',
         $autoCancel: false
       });
 
-      console.log('=== RESPUESTA DE CARGA ===');
-      console.log('Total de registros cargados:', registrosResult.items.length);
-      console.log('Registros completos:', registrosResult.items);
-      
-      // Verify each record has a valid .id property
-      const invalidRecords = registrosResult.items.filter(r => !r.id || r.id.trim() === '');
-      if (invalidRecords.length > 0) {
-        console.error('⚠️ ADVERTENCIA: Se encontraron registros sin ID válido:', invalidRecords);
-      }
-      
-      // Log first 3 records with their IDs for verification
-      registrosResult.items.slice(0, 3).forEach((registro, index) => {
-        console.log(`Registro ${index + 1}:`, {
-          id: registro.id,
-          titular: registro.titular,
-          telefono: registro.telefono,
-          llamada: registro.llamada,
-          correo_electronico: registro.correo_electronico,
-          terminos_condiciones: registro.terminos_condiciones,
-          observaciones_admin: registro.observaciones_admin
-        });
-      });
-
-      setRegistros(registrosResult.items);
-      setLastUpdate(new Date());
-      console.log('✓ Registros cargados y guardados en estado');
-      console.log('=== FIN CARGA DE REGISTROS ===');
-
-      // Calculate duplicate phones
       const phoneCount = {};
-      registrosResult.items.forEach(r => {
-        phoneCount[r.telefono] = (phoneCount[r.telefono] || 0) + 1;
+      allPhones.forEach((record) => {
+        const phone = record.telefono?.trim();
+        if (!phone) return;
+        phoneCount[phone] = (phoneCount[phone] || 0) + 1;
       });
-      
+
       const duplicates = new Set(
         Object.entries(phoneCount)
-          .filter(([_, count]) => count > 1)
+          .filter(([, count]) => count > 1)
           .map(([phone]) => phone)
       );
-      setDuplicatePhones(duplicates);
 
+      setDuplicatePhones(duplicates);
     } catch (err) {
-      console.error('=== ERROR EN CARGA DE REGISTROS ===');
-      console.error('Tipo de error:', err.name);
-      console.error('Mensaje:', err.message);
-      console.error('Error completo:', err);
+      console.error('Error al calcular teléfonos duplicados:', err);
+    }
+  };
+
+  const fetchData = async (
+    isManual = false,
+    page = currentPageRef.current,
+    filters = filtersRef.current
+  ) => {
+    try {
+      if (isManual) setIsLoading(true);
+      setError(null);
+
+      const filter = buildFilter(filters.term, filters.startDate, filters.endDate);
+      const result = await pb.collection('registros').getList(page, PAGE_SIZE, {
+        sort: '-created',
+        filter: filter || undefined,
+        $autoCancel: false
+      });
+
+      if (result.totalPages > 0 && page > result.totalPages) {
+        const safePage = result.totalPages;
+        setCurrentPage(safePage);
+        currentPageRef.current = safePage;
+        return;
+      }
+
+      setRegistros(result.items);
+      setTotalItems(result.totalItems);
+      setTotalPages(Math.max(result.totalPages, 1));
+      setLastUpdate(new Date());
+    } catch (err) {
+      console.error('Error al cargar registros de seguimiento:', err);
       setError('No se pudo establecer conexión con la base de datos.');
       if (isManual) toast.error('Error al recargar los datos');
     } finally {
@@ -104,36 +143,55 @@ export default function SeguimientoPage() {
   };
 
   useEffect(() => {
-    fetchData(true);
-
-    const intervalId = setInterval(() => {
-      if (!editingRow) {
-        fetchData(false);
-      }
-    }, 5000);
-
-    return () => clearInterval(intervalId);
-  }, [editingRow]);
+    filtersRef.current = {
+      term: debouncedSearchTerm,
+      startDate,
+      endDate
+    };
+    currentPageRef.current = currentPage;
+    fetchData(true, currentPage, filtersRef.current);
+  }, [currentPage, debouncedSearchTerm, startDate, endDate]);
 
   useEffect(() => {
-    const term = searchTerm.toLowerCase();
-    const filtered = registros.filter((r) => {
-      const matchesSearch = !term ||
-        r.titular?.toLowerCase().includes(term) ||
-        r.telefono?.includes(term) ||
-        r.ejecutivo?.toLowerCase().includes(term);
-      const recordDate = getRecordDate(r);
-      const matchesStartDate = !startDate || (recordDate && recordDate >= startDate);
-      const matchesEndDate = !endDate || (recordDate && recordDate <= endDate);
+    fetchDuplicatePhones();
+  }, []);
 
-      return matchesSearch && matchesStartDate && matchesEndDate;
-    });
-    setFilteredRegistros(filtered);
-  }, [registros, searchTerm, startDate, endDate]);
+  useEffect(() => {
+    let unsubscribe = null;
+    let isMounted = true;
+
+    const subscribeToRegistros = async () => {
+      try {
+        unsubscribe = await pb.collection('registros').subscribe('*', async () => {
+          if (!isMounted || editingRowRef.current) return;
+
+          await Promise.all([
+            fetchData(false, currentPageRef.current, filtersRef.current),
+            fetchDuplicatePhones()
+          ]);
+        });
+      } catch (err) {
+        console.error('Error al activar realtime en seguimiento:', err);
+        if (isMounted) toast.error('No se pudo activar la actualización en tiempo real');
+      }
+    };
+
+    subscribeToRegistros();
+
+    return () => {
+      isMounted = false;
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      } else {
+        pb.collection('registros').unsubscribe('*').catch(() => {});
+      }
+    };
+  }, []);
 
   const clearDateFilter = () => {
     setStartDate('');
     setEndDate('');
+    setCurrentPage(1);
   };
 
   const exportToExcel = () => {
@@ -142,12 +200,12 @@ export default function SeguimientoPage() {
       return;
     }
 
-    if (filteredRegistros.length === 0) {
+    if (registros.length === 0) {
       toast.error('No hay registros visibles para exportar');
       return;
     }
 
-    const dataToExport = filteredRegistros.map((registro) => ({
+    const dataToExport = registros.map((registro) => ({
       'Fecha captura': formatDateTime(
         registro.fecha_registro || (registro.created ? registro.created.split(' ')[0] : ''),
         registro.hora_registro
@@ -177,25 +235,15 @@ export default function SeguimientoPage() {
       ? `${startDate || 'inicio'}_a_${endDate || 'hoy'}`
       : format(new Date(), 'yyyy-MM-dd');
     XLSX.writeFile(workbook, `seguimiento_martcom_${rangeLabel}.xlsx`);
-    toast.success(`${filteredRegistros.length} registro${filteredRegistros.length === 1 ? '' : 's'} exportado${filteredRegistros.length === 1 ? '' : 's'}`);
+    toast.success(`${registros.length} registro${registros.length === 1 ? '' : 's'} de la página actual exportado${registros.length === 1 ? '' : 's'}`);
   };
 
   const startEditing = (registro) => {
-    if (!solicitarClave()) return; // 🔐 AQUÍ SE VALIDA LA CLAVE
-    
-    console.log('=== INICIO EDICIÓN ===');
-    console.log('Registro a editar:', registro);
-    console.log('ID del registro:', registro.id);
-    
+    if (!solicitarClave()) return;
+
     setEditingRow(registro.id);
+    editingRowRef.current = registro.id;
     setEditData({
-      llamada: registro.llamada || '',
-      correo_electronico: registro.correo_electronico || '',
-      terminos_condiciones: registro.terminos_condiciones || '',
-      observaciones_admin: registro.observaciones_admin || ''
-    });
-    
-    console.log('Datos cargados en formulario:', {
       llamada: registro.llamada || '',
       correo_electronico: registro.correo_electronico || '',
       terminos_condiciones: registro.terminos_condiciones || '',
@@ -204,30 +252,21 @@ export default function SeguimientoPage() {
   };
 
   const cancelEditing = () => {
-    console.log('Edición cancelada');
     setEditingRow(null);
+    editingRowRef.current = null;
     setEditData({});
+    fetchData(false, currentPageRef.current, filtersRef.current);
   };
 
   const saveChanges = async (registroId) => {
-    console.log('=== INICIO GUARDADO DE CAMBIOS ===');
-    console.log('ID del registro a actualizar:', registroId);
-    console.log('Tipo de ID:', typeof registroId);
-    console.log('ID es válido:', !!(registroId && registroId.trim()));
-    
-    // Validate registroId is not empty/undefined/null before update
     if (!registroId || registroId.trim() === '') {
-      console.error('ERROR: ID de registro inválido');
-      console.error('Valor recibido:', registroId);
       toast.error('Error: No se puede guardar - registro sin identificador válido');
       return;
     }
-    
+
     try {
       setIsSaving(true);
-      
-      console.log('Datos a actualizar:', editData);
-      
+
       const payload = {
         llamada: editData.llamada || null,
         correo_electronico: editData.correo_electronico || null,
@@ -235,39 +274,17 @@ export default function SeguimientoPage() {
         observaciones_admin: editData.observaciones_admin || ''
       };
 
-      console.log('=== LLAMADA A POCKETBASE ===');
-      console.log('Colección: registros');
-      console.log('Método: update');
-      console.log('ID:', registroId);
-      console.log('Payload:', payload);
-      
-      const response = await pb.collection('registros').update(registroId, payload, { $autoCancel: false });
-      
-      console.log('=== RESPUESTA DE ACTUALIZACIÓN ===');
-      console.log('Respuesta completa:', response);
-      console.log('ID actualizado:', response.id);
-      console.log('Campos actualizados:', {
-        llamada: response.llamada,
-        correo_electronico: response.correo_electronico,
-        terminos_condiciones: response.terminos_condiciones,
-        observaciones_admin: response.observaciones_admin
-      });
-      console.log('✓ Registro actualizado exitosamente');
+      await pb.collection('registros').update(registroId, payload, { $autoCancel: false });
 
       toast.success('Registro actualizado correctamente');
       setEditingRow(null);
+      editingRowRef.current = null;
       setEditData({});
-      
-      await fetchData(true);
-      console.log('=== FIN GUARDADO DE CAMBIOS ===');
+
+      await fetchData(true, currentPageRef.current, filtersRef.current);
     } catch (err) {
-      console.error('=== ERROR EN ACTUALIZACIÓN ===');
-      console.error('Tipo de error:', err.name);
-      console.error('Código de estado:', err.status);
-      console.error('Mensaje:', err.message);
-      console.error('Error completo:', err);
-      console.error('Datos del error:', err.data);
-      
+      console.error('Error al actualizar el registro:', err);
+
       if (err.status === 404) {
         toast.error('Error 404: El registro no existe o fue eliminado', {
           action: {
@@ -299,18 +316,27 @@ export default function SeguimientoPage() {
       return dateStr;
     }
   };
+
   const solicitarClave = () => {
-  const claveCorrecta = "2104"; // 🔑 CAMBIA AQUÍ TU CLAVE
+    const claveCorrecta = '2104';
+    const clave = prompt('Ingresa la clave para evaluar:');
 
-  const clave = prompt("Ingresa la clave para evaluar:");
+    if (clave === claveCorrecta) return true;
 
-  if (clave === claveCorrecta) {
-    return true;
-  } else {
-    alert("❌ Clave incorrecta");
+    alert('❌ Clave incorrecta');
     return false;
-  }
   };
+
+  const goToPreviousPage = () => {
+    if (editingRow) return;
+    setCurrentPage((page) => Math.max(1, page - 1));
+  };
+
+  const goToNextPage = () => {
+    if (editingRow) return;
+    setCurrentPage((page) => Math.min(totalPages, page + 1));
+  };
+
   return (
     <>
       <Helmet>
@@ -320,15 +346,20 @@ export default function SeguimientoPage() {
 
       <div className="min-h-[100dvh] bg-muted/30 py-8">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 bg-white p-4 rounded-xl border shadow-sm">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="w-4 h-4" />
               <span>
                 Última actualización: {lastUpdate ? lastUpdate.toLocaleTimeString('es-MX') : 'Cargando...'}
               </span>
+              <span className="hidden sm:inline text-emerald-600 font-medium">• Realtime activo</span>
             </div>
-            <Button onClick={() => fetchData(true)} variant="secondary" className="w-full sm:w-auto gap-2" disabled={isSaving}>
+            <Button
+              onClick={() => fetchData(true, currentPage, filtersRef.current)}
+              variant="secondary"
+              className="w-full sm:w-auto gap-2"
+              disabled={isSaving || !!editingRow}
+            >
               <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
               Recargar Ahora
             </Button>
@@ -350,26 +381,29 @@ export default function SeguimientoPage() {
                 <div>
                   <CardTitle className="text-2xl font-bold tracking-tight">Seguimiento y validación</CardTitle>
                   <CardDescription className="text-base mt-1">
-                    Valida el contacto y confirmación de cada registro ({registros.length} total).
+                    {debouncedSearchTerm || startDate || endDate
+                      ? `${totalItems} registro${totalItems === 1 ? '' : 's'} coincide${totalItems === 1 ? '' : 'n'} con los filtros.`
+                      : `${totalItems} registros en total.`}
                   </CardDescription>
                   {duplicatePhones.size > 0 && (
                     <div className="flex items-center gap-2 mt-3 p-3 bg-[hsl(var(--accent-orange))]/10 border border-[hsl(var(--accent-orange))]/20 rounded-lg">
                       <AlertTriangle className="w-5 h-5 text-[hsl(var(--accent-orange))]" />
                       <span className="text-sm font-medium text-[hsl(var(--accent-orange))]">
-                        Atención: Se detectaron {duplicatePhones.size} teléfono{duplicatePhones.size !== 1 ? 's' : ''} duplicado{duplicatePhones.size !== 1 ? 's' : ''}.
+                        Atención: Se detectaron {duplicatePhones.size} teléfono{duplicatePhones.size !== 1 ? 's' : ''} duplicado{duplicatePhones.size !== 1 ? 's' : ''} en la base completa.
                       </span>
                     </div>
                   )}
                 </div>
-                
+
                 <div className="flex flex-col gap-3 w-full md:w-auto">
                   <div className="relative w-full md:w-80 md:self-end">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Filtrar por titular o teléfono..."
+                      placeholder="Buscar titular, teléfono o ejecutivo..."
                       className="pl-9 bg-white"
+                      disabled={!!editingRow}
                     />
                   </div>
                   <div className="flex flex-col sm:flex-row sm:items-end gap-2">
@@ -380,8 +414,12 @@ export default function SeguimientoPage() {
                         type="date"
                         value={startDate}
                         max={endDate || undefined}
-                        onChange={(e) => setStartDate(e.target.value)}
+                        onChange={(e) => {
+                          setStartDate(e.target.value);
+                          setCurrentPage(1);
+                        }}
                         className="bg-white sm:w-[155px]"
+                        disabled={!!editingRow}
                       />
                     </div>
                     <div className="space-y-1">
@@ -391,8 +429,12 @@ export default function SeguimientoPage() {
                         type="date"
                         value={endDate}
                         min={startDate || undefined}
-                        onChange={(e) => setEndDate(e.target.value)}
+                        onChange={(e) => {
+                          setEndDate(e.target.value);
+                          setCurrentPage(1);
+                        }}
                         className="bg-white sm:w-[155px]"
+                        disabled={!!editingRow}
                       />
                     </div>
                     {(startDate || endDate) && (
@@ -403,6 +445,7 @@ export default function SeguimientoPage() {
                         onClick={clearDateFilter}
                         title="Limpiar rango de fechas"
                         aria-label="Limpiar rango de fechas"
+                        disabled={!!editingRow}
                       >
                         <X className="w-4 h-4" />
                       </Button>
@@ -411,11 +454,11 @@ export default function SeguimientoPage() {
                       type="button"
                       variant="outline"
                       onClick={exportToExcel}
-                      disabled={isLoading || filteredRegistros.length === 0}
+                      disabled={isLoading || registros.length === 0 || !!editingRow}
                       className="gap-2"
                     >
                       <Download className="w-4 h-4" />
-                      Exportar ({filteredRegistros.length})
+                      Exportar página ({registros.length})
                     </Button>
                   </div>
                 </div>
@@ -450,24 +493,29 @@ export default function SeguimientoPage() {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ) : filteredRegistros.length === 0 ? (
+                      ) : registros.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={11} className="text-center py-12 text-muted-foreground font-medium">
-                            {registros.length === 0 ? 'No hay registros en la base de datos' : 'No se encontraron registros para mostrar'}
+                            {debouncedSearchTerm || startDate || endDate
+                              ? 'No se encontraron registros para los filtros seleccionados.'
+                              : 'No hay registros en la base de datos'}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredRegistros.map((registro) => {
-                          const isDuplicate = duplicatePhones.has(registro.telefono);
+                        registros.map((registro) => {
+                          const isDuplicate = duplicatePhones.has(registro.telefono?.trim());
                           const isEditing = editingRow === registro.id;
 
                           return (
-                            <TableRow 
-                              key={registro.id} 
+                            <TableRow
+                              key={registro.id}
                               className={`hover:bg-muted/30 transition-colors ${isDuplicate ? 'duplicate-highlight bg-[hsl(var(--accent-orange))]/5' : ''}`}
                             >
                               <TableCell className="font-medium text-xs whitespace-nowrap">
-                                {formatDateTime(registro.fecha_registro || (registro.created ? registro.created.split(' ')[0] : ''), registro.hora_registro)}
+                                {formatDateTime(
+                                  registro.fecha_registro || (registro.created ? registro.created.split(' ')[0] : ''),
+                                  registro.hora_registro
+                                )}
                               </TableCell>
                               <TableCell>
                                 <div className="flex flex-col gap-1">
@@ -482,19 +530,14 @@ export default function SeguimientoPage() {
                               <TableCell className="font-mono text-sm">{registro.telefono}</TableCell>
                               <TableCell className="text-sm">{registro.plan}</TableCell>
                               <TableCell className="text-sm">{registro.ejecutivo}</TableCell>
-                              
                               <TableCell className="text-sm text-muted-foreground">
                                 <div className="max-w-[200px] line-clamp-2" title={registro.comentarios}>
                                   {registro.comentarios || '-'}
                                 </div>
                               </TableCell>
-                              
                               <TableCell>
                                 {isEditing ? (
-                                  <Select 
-                                    value={editData.llamada} 
-                                    onValueChange={(value) => setEditData(prev => ({ ...prev, llamada: value }))}
-                                  >
+                                  <Select value={editData.llamada} onValueChange={(value) => setEditData((prev) => ({ ...prev, llamada: value }))}>
                                     <SelectTrigger className="w-[90px] h-8 text-sm">
                                       <SelectValue placeholder="-" />
                                     </SelectTrigger>
@@ -509,13 +552,9 @@ export default function SeguimientoPage() {
                                   </span>
                                 )}
                               </TableCell>
-
                               <TableCell>
                                 {isEditing ? (
-                                  <Select 
-                                    value={editData.correo_electronico} 
-                                    onValueChange={(value) => setEditData(prev => ({ ...prev, correo_electronico: value }))}
-                                  >
+                                  <Select value={editData.correo_electronico} onValueChange={(value) => setEditData((prev) => ({ ...prev, correo_electronico: value }))}>
                                     <SelectTrigger className="w-[90px] h-8 text-sm">
                                       <SelectValue placeholder="-" />
                                     </SelectTrigger>
@@ -530,13 +569,9 @@ export default function SeguimientoPage() {
                                   </span>
                                 )}
                               </TableCell>
-
                               <TableCell>
                                 {isEditing ? (
-                                  <Select 
-                                    value={editData.terminos_condiciones} 
-                                    onValueChange={(value) => setEditData(prev => ({ ...prev, terminos_condiciones: value }))}
-                                  >
+                                  <Select value={editData.terminos_condiciones} onValueChange={(value) => setEditData((prev) => ({ ...prev, terminos_condiciones: value }))}>
                                     <SelectTrigger className="w-[90px] h-8 text-sm">
                                       <SelectValue placeholder="-" />
                                     </SelectTrigger>
@@ -551,12 +586,11 @@ export default function SeguimientoPage() {
                                   </span>
                                 )}
                               </TableCell>
-
                               <TableCell>
                                 {isEditing ? (
                                   <Textarea
                                     value={editData.observaciones_admin}
-                                    onChange={(e) => setEditData(prev => ({ ...prev, observaciones_admin: e.target.value }))}
+                                    onChange={(e) => setEditData((prev) => ({ ...prev, observaciones_admin: e.target.value }))}
                                     placeholder="Añadir nota admin..."
                                     className="w-full min-w-[200px] min-h-[60px] text-sm bg-white resize-y"
                                   />
@@ -566,25 +600,13 @@ export default function SeguimientoPage() {
                                   </span>
                                 )}
                               </TableCell>
-
                               <TableCell className="text-right">
                                 {isEditing ? (
                                   <div className="flex justify-end gap-2">
-                                    <Button 
-                                      size="sm" 
-                                      variant="ghost" 
-                                      onClick={cancelEditing} 
-                                      disabled={isSaving}
-                                      className="h-8 px-2 text-muted-foreground"
-                                    >
+                                    <Button size="sm" variant="ghost" onClick={cancelEditing} disabled={isSaving} className="h-8 px-2 text-muted-foreground">
                                       Cancelar
                                     </Button>
-                                    <Button 
-                                      size="sm" 
-                                      onClick={() => saveChanges(registro.id)} 
-                                      disabled={isSaving}
-                                      className="h-8 gap-1.5 px-3 min-w-[100px]"
-                                    >
+                                    <Button size="sm" onClick={() => saveChanges(registro.id)} disabled={isSaving} className="h-8 gap-1.5 px-3 min-w-[100px]">
                                       {isSaving ? (
                                         <>
                                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -610,6 +632,34 @@ export default function SeguimientoPage() {
                       )}
                     </TableBody>
                   </Table>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-5">
+                <p className="text-sm text-muted-foreground">
+                  Página {currentPage} de {totalPages} · hasta {PAGE_SIZE} registros por página
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToPreviousPage}
+                    disabled={currentPage <= 1 || isLoading || !!editingRow}
+                    className="gap-1"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToNextPage}
+                    disabled={currentPage >= totalPages || isLoading || !!editingRow}
+                    className="gap-1"
+                  >
+                    Siguiente
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
             </CardContent>

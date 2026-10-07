@@ -1,18 +1,12 @@
-
-import React, { useState, useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
+import React, { useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import LoginModal from '@/components/LoginModal.jsx';
 
 export default function ProtectedRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const [showLoginModal, setShowLoginModal] = useState(false);
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      setShowLoginModal(true);
-    }
-  }, [isLoading, isAuthenticated]);
+  const navigate = useNavigate();
+  const loggedInRef = useRef(false);
 
   if (isLoading) {
     return (
@@ -26,15 +20,21 @@ export default function ProtectedRoute({ children }) {
   }
 
   if (!isAuthenticated) {
+    // Antes se mostraba el modal y se redirigía a "/" al mismo tiempo, así que el
+    // modal desaparecía al instante. Ahora se queda abierto en la ruta pedida;
+    // si el usuario lo cierra sin entrar, se le regresa a Captura.
     return (
-      <>
-        <LoginModal 
-          open={showLoginModal} 
-          onOpenChange={setShowLoginModal}
-          onSuccess={() => setShowLoginModal(false)}
+      <div className="min-h-[100dvh] bg-muted/30">
+        <LoginModal
+          open
+          onSuccess={() => {
+            loggedInRef.current = true;
+          }}
+          onOpenChange={(open) => {
+            if (!open && !loggedInRef.current) navigate('/', { replace: true });
+          }}
         />
-        <Navigate to="/" replace />
-      </>
+      </div>
     );
   }
 

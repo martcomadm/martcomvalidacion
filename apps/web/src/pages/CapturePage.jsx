@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { UserPlus, CheckCircle2, AlertCircle } from 'lucide-react';
+import { format } from 'date-fns';
 import pb from '@/lib/pocketbaseClient';
 import SuccessModal from '@/components/SuccessModal.jsx';
 
@@ -57,6 +58,18 @@ export default function CapturePage() {
       newErrors.titular = 'El nombre del titular es requerido';
     }
 
+    if (!formData.telefono.trim()) {
+      newErrors.telefono = 'El teléfono es requerido';
+    } else if (!/^\d{10}$/.test(formData.telefono)) {
+      newErrors.telefono = 'El teléfono debe tener 10 dígitos';
+    }
+
+    if (!formData.correo.trim()) {
+      newErrors.correo = 'El correo electrónico es requerido';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formData.correo)) {
+      newErrors.correo = 'Ingresa un correo electrónico válido';
+    }
+
     if (!formData.nss.trim()) {
       newErrors.nss = 'El NSS es requerido';
     } else if (!/^\d+$/.test(formData.nss)) {
@@ -101,8 +114,10 @@ export default function CapturePage() {
 
   try {
     const now = new Date();
-    const fecha_registro = now.toISOString().split('T')[0];
-    const hora_registro = now.toLocaleTimeString('es-MX', { hour12: false });
+    // Fecha y hora LOCALES (México). toISOString() usa UTC y después de las 6 pm
+    // guardaba la fecha del día siguiente.
+    const fecha_registro = format(now, 'yyyy-MM-dd');
+    const hora_registro = format(now, 'HH:mm:ss');
 
     const payload = {
       ...formData,
@@ -110,29 +125,14 @@ export default function CapturePage() {
       hora_registro
     };
 
-    console.log('=== INICIO CREACIÓN DE REGISTRO ===');
-    console.log('Payload enviado:', payload);
-
     const response = await pb.collection('registros').create(payload, {
-    $autoCancel: false
+      $autoCancel: false
     });
 
-    console.log('=== RESPUESTA DEL SERVIDOR ===');
-    console.log('RESPONSE KEYS:', Object.keys(response));
-    console.log('RESPONSE COMPLETO:', response);
-
-    // 🔥 DETECTAR ID CORRECTAMENTE
     const recordId = response?.id || response?.data?.id;
-
-    console.log('ID detectado:', recordId);
-
-    // ✅ VALIDACIÓN CORRECTA
     if (!recordId) {
-    console.error('❌ Respuesta inválida:', response);
-    throw new Error('No se pudo crear el registro');
+      throw new Error('No se pudo crear el registro');
     }
-
-    console.log('✅ Registro creado con ID:', recordId);
 
     toast.success('Registro guardado correctamente');
 
@@ -140,11 +140,8 @@ export default function CapturePage() {
     setShowSuccessModal(true);
 
   } catch (error) {
-    console.error('=== ERROR ===');
-    console.error('Error completo:', error);
-    console.error('Error data:', error?.data);
+    console.error('Error al guardar registro:', error?.status, error?.message);
 
-    // 🔥 MENSAJE MÁS INTELIGENTE
     if (error?.data?.data) {
       const errores = Object.values(error.data.data)
         .map(e => e.message)

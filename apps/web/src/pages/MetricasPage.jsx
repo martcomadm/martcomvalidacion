@@ -32,6 +32,36 @@ const getRecordDate = (registro) => {
 const formatDateLabel = (date) =>
   date.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' });
 
+// Clave de día en hora LOCAL (yyyy-MM-dd). toISOString() usa UTC y desfasa el día.
+const toDayKey = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+// Interpreta 'yyyy-MM-dd' como fecha local (new Date('yyyy-MM-dd') la toma como UTC).
+const fromDayKey = (key) => {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+const buildDailyHistory = (items) =>
+  Object.entries(
+    items.reduce((acc, curr) => {
+      const date = getRecordDate(curr);
+      if (!date) return acc;
+      const key = toDayKey(date);
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, cantidad]) => ({
+      fecha: formatDateLabel(fromDayKey(key)),
+      cantidad
+    }));
+
 export default function MetricasPage() {
   const [registros, setRegistros] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -47,12 +77,16 @@ export default function MetricasPage() {
       if (isManual) setIsLoading(true);
       setError(null);
 
-      const result = await pb.collection('registros').getList(1, 500, {
+      // Antes solo se traían los últimos 500 registros; ahora se traen todos
+      // (en lotes) y únicamente los campos que usan las métricas.
+      const items = await pb.collection('registros').getFullList({
         sort: '-created',
+        fields: 'id,created,fecha_registro,plan,tipo_ingreso,chat,ejecutivo',
+        batch: 1000,
         $autoCancel: false
       });
 
-      setRegistros(result.items);
+      setRegistros(items);
       setLastUpdate(new Date());
     } catch (err) {
       console.error('Error al cargar datos:', err);
@@ -123,20 +157,7 @@ export default function MetricasPage() {
       return normalized >= minDate;
     });
 
-    const byDay = filtered.reduce((acc, curr) => {
-      const date = getRecordDate(curr);
-      if (!date) return acc;
-      const key = toDateOnly(date).toISOString().split('T')[0];
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-
-    const sortedHistory = Object.entries(byDay)
-      .sort(([a], [b]) => new Date(a) - new Date(b))
-      .map(([date, cantidad]) => ({
-        fecha: formatDateLabel(new Date(date)),
-        cantidad
-      }));
+    const sortedHistory = buildDailyHistory(filtered);
 
     return {
       registrosFiltrados: filtered,
@@ -199,18 +220,18 @@ export default function MetricasPage() {
     .map(([name, value]) => ({ name: name || 'Sin Chat', value }))
     .filter((item) => item.value > 0);
 
-  const dataEjecutivo = Object.entries(
+  const conteoEjecutivos = Object.entries(
     registrosFiltradosPorAgente.reduce((acc, curr) => {
-      acc[curr.ejecutivo] = (acc[curr.ejecutivo] || 0) + 1;
+      const agente = curr?.ejecutivo?.trim() || 'Desconocido';
+      acc[agente] = (acc[agente] || 0) + 1;
       return acc;
     }, {})
   )
-    .map(([ejecutivo, cantidad]) => ({
-      ejecutivo: ejecutivo?.split(' ')[0] || 'Desconocido',
-      cantidad
-    }))
-    .sort((a, b) => b.cantidad - a.cantidad)
-    .slice(0, 15);
+    .map(([ejecutivo, cantidad]) => ({ ejecutivo, cantidad }))
+    .sort((a, b) => b.cantidad - a.cantidad);
+
+  const totalEjecutivosActivos = conteoEjecutivos.length;
+  const dataEjecutivo = conteoEjecutivos.slice(0, 15);
 
   const dataTipoIngresoChart = useMemo(() => {
     const total = dataTipoIngreso.reduce((sum, item) => sum + item.value, 0);
@@ -440,19 +461,19 @@ export default function MetricasPage() {
                   <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{dataEjecutivo.length}</div>
+                  <div className="text-2xl font-bold">{totalEjecutivosActivos}</div>
                   <p className="text-xs text-muted-foreground mt-1">Con registros asignados</p>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Planes vendidos</CardTitle>
+                  <CardTitle className="text-sm font-medium">Planes distintos</CardTitle>
                   <AlertCircle className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{dataPlan.length}</div>
-                  <p className="text-xs text-muted-foreground mt-1">Tipos de planes</p>
+                  <p className="text-xs text-muted-foreground mt-1">Tipos de plan registrados</p>
                 </CardContent>
               </Card>
 
@@ -491,20 +512,7 @@ export default function MetricasPage() {
                         data={
                           selectedAgent === 'all'
                             ? historialDiario
-                            : Object.entries(
-                                registrosFiltradosPorAgente.reduce((acc, curr) => {
-                                  const date = getRecordDate(curr);
-                                  if (!date) return acc;
-                                  const key = toDateOnly(date).toISOString().split('T')[0];
-                                  acc[key] = (acc[key] || 0) + 1;
-                                  return acc;
-                                }, {})
-                              )
-                                .sort(([a], [b]) => new Date(a) - new Date(b))
-                                .map(([date, cantidad]) => ({
-                                  fecha: formatDateLabel(new Date(date)),
-                                  cantidad
-                                }))
+                            : buildDailyHistory(registrosFiltradosPorAgente)
                         }
                       >
                         <CartesianGrid strokeDasharray="3 3" />
@@ -612,7 +620,7 @@ export default function MetricasPage() {
                     <ResponsiveContainer width="100%" height={350}>
                       <BarChart data={dataEjecutivo}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="ejecutivo" angle={-45} textAnchor="end" height={80} interval={0} tick={{ fontSize: 12 }} />
+                        <XAxis dataKey="ejecutivo" angle={-45} textAnchor="end" height={120} interval={0} tick={{ fontSize: 11 }} />
                         <YAxis />
                         <Tooltip />
                         <Bar dataKey="cantidad" fill="#148286" name="Total registros" radius={[4, 4, 0, 0]} />
@@ -645,7 +653,7 @@ export default function MetricasPage() {
 
                 <Card className="lg:col-span-2">
                   <CardHeader>
-                    <CardTitle>Estadísticas por agente (Top 20)</CardTitle>
+                    <CardTitle>Estadísticas por agente (Top 15)</CardTitle>
                     <CardDescription>Resumen de desempeño por ejecutivo en el período seleccionado</CardDescription>
                   </CardHeader>
                   <CardContent>

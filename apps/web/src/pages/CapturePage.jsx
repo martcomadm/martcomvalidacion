@@ -64,9 +64,8 @@ export default function CapturePage() {
       newErrors.telefono = 'El teléfono debe tener 10 dígitos';
     }
 
-    if (!formData.correo.trim()) {
-      newErrors.correo = 'El correo electrónico es requerido';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formData.correo)) {
+    // El correo es opcional; solo se valida el formato si lo capturan.
+    if (formData.correo.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formData.correo)) {
       newErrors.correo = 'Ingresa un correo electrónico válido';
     }
 
@@ -290,7 +289,7 @@ export default function CapturePage() {
                   </div>
 
                   <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="correo">Correo electrónico <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="correo">Correo electrónico (Opcional)</Label>
                     <Input
                       id="correo"
                       type="email"

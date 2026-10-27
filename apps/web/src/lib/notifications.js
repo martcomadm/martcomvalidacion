@@ -9,7 +9,7 @@
 //
 // Para activarlo, pega aquí el "App ID" de tu app en OneSignal
 // (OneSignal → Settings → Keys & IDs). Mientras esté vacío, la función queda oculta.
-export const ONESIGNAL_APP_ID = '';
+export const ONESIGNAL_APP_ID = '25f04d5d-eb9f-4aac-a9e1-3cc4c387e625';
 
 const ADMIN_TAG_KEY = 'rol';
 const ADMIN_TAG_VALUE = 'admin';

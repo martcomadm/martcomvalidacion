@@ -4,6 +4,8 @@ import { useAuth } from '@/contexts/AuthContext.jsx';
 import { Button } from '@/components/ui/button';
 import { LogOut, Lock } from 'lucide-react';
 import LoginModal from '@/components/LoginModal.jsx';
+import AdminNotifications from '@/components/AdminNotifications.jsx';
+import { disableAdminNotifications } from '@/lib/notifications';
 import { toast } from 'sonner';
 
 export default function Header() {
@@ -19,6 +21,8 @@ export default function Header() {
   ];
 
   const handleLogout = () => {
+    // Al cerrar sesión este dispositivo deja de recibir avisos de altas.
+    disableAdminNotifications();
     logout();
     toast.success('Sesión cerrada');
   };
@@ -60,6 +64,7 @@ export default function Header() {
             </nav>
 
             <div className="flex items-center gap-2">
+              {isAuthenticated && <AdminNotifications />}
               {isAuthenticated ? (
                 <Button
                   variant="outline"

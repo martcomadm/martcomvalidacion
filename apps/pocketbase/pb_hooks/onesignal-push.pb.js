@@ -12,7 +12,7 @@ $app.logger().info("Hook cargado: onesignal-push.pb.js")
  * - ONESIGNAL_APP_ID    (OneSignal → Settings → Keys & IDs → App ID)
  * - ONESIGNAL_API_KEY   (OneSignal → Settings → Keys & IDs → App API Key)
  * Opcional:
- * - SITE_URL            (por defecto https://validacionmartcom.site)
+ * - SITE_URL            (por defecto https://martcom-validaciones-web-validacion.mchc0z.easypanel.host)
  *
  * Notas:
  * - NO bloquea la creación del registro si OneSignal falla.
@@ -26,7 +26,7 @@ onRecordAfterCreateSuccess((e) => {
 
     const appId = $os.getenv("ONESIGNAL_APP_ID")
     const apiKey = $os.getenv("ONESIGNAL_API_KEY")
-    const siteUrl = ($os.getenv("SITE_URL") || "https://validacionmartcom.site").replace(/\/+$/, "")
+    const siteUrl = ($os.getenv("SITE_URL") || "https://martcom-validaciones-web-validacion.mchc0z.easypanel.host").replace(/\/+$/, "")
 
     if (!appId || !apiKey) {
         $app.logger().warn("OneSignal no configurado: faltan ONESIGNAL_APP_ID / ONESIGNAL_API_KEY. Se omite notificación.")

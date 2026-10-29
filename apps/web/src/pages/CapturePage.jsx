@@ -31,6 +31,14 @@ const CHATS = [
   'CHAT 05', 'CHAT 06', 'CHAT 07', 'CHAT 09', 'CHAT 11', 'CHAT B','CHAT EXTERNO','CHAT A'
 ];
 
+// Quita acentos y diéresis (Á→A, É→E, Ü→U...) pero conserva la Ñ.
+const quitarAcentos = (texto) =>
+  texto
+    .replace(/Ñ/g, '\u0000')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0000/g, 'Ñ');
+
 const INITIAL_FORM_DATA = {
   titular: '',
   telefono: '',
@@ -222,7 +230,7 @@ export default function CapturePage() {
                     <Input
                       id="titular"
                       value={formData.titular}
-                      onChange={(e) => handleInputChange('titular', e.target.value.toUpperCase())}
+                      onChange={(e) => handleInputChange('titular', quitarAcentos(e.target.value.toUpperCase()))}
                       placeholder="NOMBRE COMPLETO"
                       className="uppercase text-gray-900 font-medium"
                     />
